@@ -11,6 +11,7 @@ def f_eval(env, expr):
 _DEFAULT_ENV = {
     "+": lambda env, expr: f_eval(env, expr[0]) + f_eval(env, expr[1][0]),
     "$vau": lambda env, expr: lambda dyn, args: f_eval({**env, expr[0][0]: dyn, expr[0][1][0]: args}, expr[1][0]),
+    "eval": lambda env, expr: f_eval(f_eval(env, expr[0]), f_eval(env, expr[1][0])),
     "car": lambda env, expr: f_eval(env, expr[0])[0],
     "cdr": lambda env, expr: f_eval(env, expr[0])[1],
 }
