@@ -29,6 +29,19 @@ def _f_evlis(env, expr):
         expr, rev_expr = (rev_expr[0], expr), rev_expr[1]
     return expr
 
+# load a file in an environment
+def _f_load(env, expr):
+    with open(expr) as file:
+        text = file.read()
+    tokens = tokenize(text)
+    try:
+        exprs = parse(tokens)
+    except ValueError as e:
+        exit(e)
+    for expr in exprs:
+        f_eval(env, expr)
+    return env
+
 _DEFAULT_ENV = {
     "+": Combiner(1, lambda env, expr: expr[0] + expr[1][0]),
     "$vau": Combiner(0, lambda env, expr: Combiner(0, lambda dyn, args: f_eval({**env, expr[0][0]: dyn, expr[0][1][0]: args}, expr[1][0]))),
@@ -38,8 +51,7 @@ _DEFAULT_ENV = {
     "$define!": Combiner(0, lambda env, expr: env.__setitem__(expr[0], f_eval(env, expr[1][0]))),
     "$car": Combiner(0, lambda env, expr: expr[0][0]),
     "$cdr": Combiner(0, lambda env, expr: expr[0][1]),
-    "car": Combiner(1, lambda env, expr: expr[0][0]),
-    "cdr": Combiner(1, lambda env, expr: expr[0][1]),
+    "load": Combiner(1, lambda env, expr: _f_load(expr[0], expr[1][0])),
 }
 
 def tokenize(text):
