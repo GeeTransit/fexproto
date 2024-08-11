@@ -3,7 +3,7 @@ def f_eval(env, expr):
         return env[expr]
     elif type(expr) is tuple:
         return f_eval(env, expr[0])(env, expr[1])
-    elif type(expr) in (int, float):
+    elif type(expr) in (int, float, type(lambda: None)):
         return expr
     else:
         exit(f'unknown expression type: {expr}')
@@ -26,6 +26,9 @@ _DEFAULT_ENV = {
     "+": lambda env, expr: f_eval(env, expr[0]) + f_eval(env, expr[1][0]),
     "$vau": lambda env, expr: lambda dyn, args: f_eval({**env, expr[0][0]: dyn, expr[0][1][0]: args}, expr[1][0]),
     "eval": f_wrap(None, lambda env, expr: f_eval(expr[0], expr[1][0])),
+    "wrap": f_wrap(None, lambda env, expr: f_wrap(env, expr[0])),
+    "$car": lambda env, expr: expr[0][0],
+    "$cdr": lambda env, expr: expr[0][1],
     "car": lambda env, expr: f_eval(env, expr[0])[0],
     "cdr": lambda env, expr: f_eval(env, expr[0])[1],
 }

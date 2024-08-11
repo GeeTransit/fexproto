@@ -1,0 +1,21 @@
+Is it possible to make a function lambda such that the following are
+equivalent?
+
+    (vau (e a)
+        (+  (eval e (car a))
+            (eval e (car (cdr a)))))
+
+    (lambda (e a)
+        (+  (car a)
+            (car (cdr a))))
+
+In my opinion, using any applicatives (functions which evaluate their
+arguments) basically requires there to be a way to evaluate arguments already,
+as otherwise how would they be defined. Viewing applicatives as simply
+operatives (functions which do not evaluate their arguments) that evaluate
+their arguments one time [^1] lets us see that evaluation itself is a necessary
+primitive.
+
+[^1]: N. Braswell, S. Khan, and S. Pande, 'Practical compilation of fexprs
+using partial evaluation: Fexprs can performantly replace macros in
+purely-functional Lisp', *arXiv e-prints*, p. arXiv:2303.12254, Mar. 2023.
