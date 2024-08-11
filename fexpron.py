@@ -8,10 +8,24 @@ def f_eval(env, expr):
     else:
         exit(f'unknown expression type: {expr}')
 
+# evaluate each element in the list
+def _f_evlis(env, expr):
+    rev_expr = None
+    while expr is not None:
+        rev_expr, expr = (f_eval(env, expr[0]), rev_expr), expr[1]
+    while rev_expr is not None:
+        expr, rev_expr = (rev_expr[0], expr), rev_expr[1]
+    return expr
+
+# wrap the given combiner in another layer of argument evaluation
+def f_wrap(env, expr):
+    assert f_eval(None, expr) is expr, "argument to wrap is not self-evaluating"
+    return lambda dyn, args: f_eval(dyn, (expr, _f_evlis(dyn, args)))
+
 _DEFAULT_ENV = {
     "+": lambda env, expr: f_eval(env, expr[0]) + f_eval(env, expr[1][0]),
     "$vau": lambda env, expr: lambda dyn, args: f_eval({**env, expr[0][0]: dyn, expr[0][1][0]: args}, expr[1][0]),
-    "eval": lambda env, expr: f_eval(f_eval(env, expr[0]), f_eval(env, expr[1][0])),
+    "eval": f_wrap(None, lambda env, expr: f_eval(expr[0], expr[1][0])),
     "car": lambda env, expr: f_eval(env, expr[0])[0],
     "cdr": lambda env, expr: f_eval(env, expr[0])[1],
 }
