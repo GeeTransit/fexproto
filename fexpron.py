@@ -1,9 +1,20 @@
+# wraps a function with zero, one, or more layers of argument evaluation
+class Combiner:
+    def __init__(self, num_wraps, func):
+        self.num_wraps = num_wraps
+        assert callable(func), f'combiner function is not callable: {func}'
+        self.func = func
+
 def f_eval(env, expr):
     if type(expr) is str:
         return env[expr]
     elif type(expr) is tuple:
-        return f_eval(env, expr[0])(env, expr[1])
-    elif type(expr) in (int, float, type(lambda: None)):
+        name, args = expr
+        combiner = f_eval(env, name)
+        for _ in range(combiner.num_wraps):
+            args = _f_evlis(env, args)
+        return combiner.func(env, args)
+    elif type(expr) in (int, float, Combiner):
         return expr
     else:
         exit(f'unknown expression type: {expr}')
@@ -17,21 +28,16 @@ def _f_evlis(env, expr):
         expr, rev_expr = (rev_expr[0], expr), rev_expr[1]
     return expr
 
-# wrap the given combiner in another layer of argument evaluation
-def f_wrap(env, expr):
-    assert f_eval(None, expr) is expr, "argument to wrap is not self-evaluating"
-    return lambda dyn, args: f_eval(dyn, (expr, _f_evlis(dyn, args)))
-
 _DEFAULT_ENV = {
-    "+": lambda env, expr: f_eval(env, expr[0]) + f_eval(env, expr[1][0]),
-    "$vau": lambda env, expr: lambda dyn, args: f_eval({**env, expr[0][0]: dyn, expr[0][1][0]: args}, expr[1][0]),
-    "eval": f_wrap(None, lambda env, expr: f_eval(expr[0], expr[1][0])),
-    "wrap": f_wrap(None, lambda env, expr: f_wrap(env, expr[0])),
-    "$define!": lambda env, expr: env.__setitem__(expr[0], f_eval(env, expr[1][0])),
-    "$car": lambda env, expr: expr[0][0],
-    "$cdr": lambda env, expr: expr[0][1],
-    "car": lambda env, expr: f_eval(env, expr[0])[0],
-    "cdr": lambda env, expr: f_eval(env, expr[0])[1],
+    "+": Combiner(1, lambda env, expr: expr[0] + expr[1][0]),
+    "$vau": Combiner(0, lambda env, expr: Combiner(0, lambda dyn, args: f_eval({**env, expr[0][0]: dyn, expr[0][1][0]: args}, expr[1][0]))),
+    "eval": Combiner(1, lambda env, expr: f_eval(expr[0], expr[1][0])),
+    "wrap": Combiner(1, lambda env, expr: Combiner(expr[0].num_wraps + 1, expr[0].func)),
+    "$define!": Combiner(0, lambda env, expr: env.__setitem__(expr[0], f_eval(env, expr[1][0]))),
+    "$car": Combiner(0, lambda env, expr: expr[0][0]),
+    "$cdr": Combiner(0, lambda env, expr: expr[0][1]),
+    "car": Combiner(1, lambda env, expr: expr[0][0]),
+    "cdr": Combiner(1, lambda env, expr: expr[0][1]),
 }
 
 def tokenize(text):
