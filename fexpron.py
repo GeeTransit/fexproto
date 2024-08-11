@@ -9,7 +9,7 @@ def f_eval(env, expr):
         exit(f'unknown expression type: {expr}')
 
 _DEFAULT_ENV = {
-    "+": lambda env, expr: expr[0] + expr[1][0]
+    "+": lambda env, expr: f_eval(env, expr[0]) + f_eval(env, expr[1][0])
 }
 
 def main(env=_DEFAULT_ENV):
