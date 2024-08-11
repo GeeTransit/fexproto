@@ -2,14 +2,17 @@ def f_eval(env, expr):
     if type(expr) is str:
         return env[expr]
     elif type(expr) is tuple:
-        return env[expr[0]](env, expr[1])
+        return f_eval(env, expr[0])(env, expr[1])
     elif type(expr) in (int, float):
         return expr
     else:
         exit(f'unknown expression type: {expr}')
 
 _DEFAULT_ENV = {
-    "+": lambda env, expr: f_eval(env, expr[0]) + f_eval(env, expr[1][0])
+    "+": lambda env, expr: f_eval(env, expr[0]) + f_eval(env, expr[1][0]),
+    "$vau": lambda env, expr: lambda dyn, args: f_eval({**env, expr[0][0]: dyn, expr[0][1][0]: args}, expr[1][0]),
+    "car": lambda env, expr: f_eval(env, expr[0])[0],
+    "cdr": lambda env, expr: f_eval(env, expr[0])[1],
 }
 
 def tokenize(text):
