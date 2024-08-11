@@ -12,17 +12,18 @@ _DEFAULT_ENV = {
     "+": lambda env, expr: f_eval(env, expr[0]) + f_eval(env, expr[1][0])
 }
 
-def main(env=_DEFAULT_ENV):
-    import sys
-    with open(sys.argv[1] if len(sys.argv) >= 2 else 0) as file:
-        text = file.read()
+def tokenize(text):
+    return text.replace("(", " ( ").replace(")", " ) ").split()
+
+def parse(tokens):
+    exprs = []
     expr_stack = []
-    for token in text.replace("(", " ( ").replace(")", " ) ").split():
+    for token in tokens:
         if token == "(":
             expr_stack.append(None)
         elif token == ")":
             if not expr_stack:
-                exit(f'unmatched close bracket')
+                raise ValueError("unmatched close bracket")
             rev_expr = expr_stack.pop()
             expr = None
             while rev_expr is not None:
@@ -30,7 +31,7 @@ def main(env=_DEFAULT_ENV):
             if expr_stack:
                 expr_stack[-1] = (expr, expr_stack[-1])
             else:
-                print(f_eval(env, expr))
+                exprs.append(expr)
         else:
             try:
                 token = float(token)
@@ -44,9 +45,22 @@ def main(env=_DEFAULT_ENV):
             if expr_stack:
                 expr_stack[-1] = (token, expr_stack[-1])
             else:
-                print(f_eval(env, token))
+                exprs.append(token)
     if expr_stack:
-        exit(f'unclosed expression: {expr_stack}')
+        raise ValueError(f'unclosed expression: {expr_stack}')
+    return exprs
+
+def main(env=_DEFAULT_ENV):
+    import sys
+    with open(sys.argv[1] if len(sys.argv) >= 2 else 0) as file:
+        text = file.read()
+    tokens = tokenize(text)
+    try:
+        exprs = parse(tokens)
+    except ValueError as e:
+        exit(e)
+    for expr in exprs:
+        print(f_eval(env, expr))
 
 if __name__ == "__main__":
     main()
