@@ -3,6 +3,8 @@ def f_eval(env, expr):
         return env[expr]
     elif type(expr) is tuple:
         return env[expr[0]](env, expr[1])
+    elif type(expr) in (int, float):
+        return expr
     else:
         exit(f'unknown expression type: {expr}')
 
