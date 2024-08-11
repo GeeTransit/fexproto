@@ -93,6 +93,7 @@ def parse(tokens):
     return exprs
 
 def main(env=_DEFAULT_ENV):
+    import pprint
     import sys
     with open(sys.argv[1] if len(sys.argv) >= 2 else 0) as file:
         text = file.read()
@@ -102,7 +103,7 @@ def main(env=_DEFAULT_ENV):
     except ValueError as e:
         exit(e)
     for expr in exprs:
-        print(f_eval(env, expr))
+        pprint.pp(f_eval(env, expr))
 
 if __name__ == "__main__":
     main()
