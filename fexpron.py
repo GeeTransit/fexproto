@@ -3,6 +3,8 @@ def f_eval(env, expr):
         return env[expr]
     elif type(expr) is tuple:
         return env[expr[0]](env, expr[1])
+    else:
+        exit(f'unknown expression type: {expr}')
 
 _DEFAULT_ENV = {
     "+": lambda env, expr: expr[0] + expr[1][0]
