@@ -6,16 +6,25 @@ class Combiner:
         assert callable(func), f'combiner function is not callable: {func}'
         self.func = func
 
+# can be resolved in an environment or used for identity
+class Symbol:
+    def __init__(self, name):
+        self.name = name
+    def __hash__(self):
+        return hash(self.name)
+    def __eq__(self, other):
+        return isinstance(other, Symbol) and self.name == other.name
+
 def f_eval(env, expr):
-    if type(expr) is str:
-        return env[expr]
+    if type(expr) is Symbol:
+        return env[expr.name]
     elif type(expr) is tuple:
         name, args = expr
         combiner = f_eval(env, name)
         for _ in range(combiner.num_wraps):
             args = _f_evlis(env, args)
         return combiner.func(env, args)
-    elif type(expr) in (int, float, Combiner):
+    elif type(expr) in (int, float, Combiner, str):
         return expr
     else:
         exit(f'unknown expression type: {expr}')
@@ -44,11 +53,11 @@ def _f_load(env, expr):
 
 _DEFAULT_ENV = {
     "+": Combiner(1, lambda env, expr: expr[0] + expr[1][0]),
-    "$vau": Combiner(0, lambda env, expr: Combiner(0, lambda dyn, args: f_eval({**env, expr[0][0]: dyn, expr[0][1][0]: args}, expr[1][0]))),
+    "$vau": Combiner(0, lambda env, expr: Combiner(0, lambda dyn, args: f_eval({**env, expr[0][0].name: dyn, expr[0][1][0].name: args}, expr[1][0]))),
     "eval": Combiner(1, lambda env, expr: f_eval(expr[0], expr[1][0])),
     "wrap": Combiner(1, lambda env, expr: Combiner(expr[0].num_wraps + 1, expr[0].func)),
     "unwrap": Combiner(1, lambda env, expr: Combiner(expr[0].num_wraps - 1, expr[0].func)),
-    "$define!": Combiner(0, lambda env, expr: env.__setitem__(expr[0], f_eval(env, expr[1][0]))),
+    "$define!": Combiner(0, lambda env, expr: env.__setitem__(expr[0].name, f_eval(env, expr[1][0]))),
     "$car": Combiner(0, lambda env, expr: expr[0][0]),
     "$cdr": Combiner(0, lambda env, expr: expr[0][1]),
     "load": Combiner(1, lambda env, expr: _f_load(expr[0], expr[1][0])),
@@ -75,15 +84,18 @@ def parse(tokens):
             else:
                 exprs.append(expr)
         else:
-            try:
-                token = float(token)
-            except ValueError:
-                pass
+            if token[0] == '"' and token[-1] == '"' and len(token) >= 2:
+                token = token[1:-1].encode("raw_unicode_escape").decode("unicode_escape")
             else:
                 try:
-                    token = int(token)
+                    token = float(token)
                 except ValueError:
-                    pass
+                    token = Symbol(token)
+                else:
+                    try:
+                        token = int(token)
+                    except ValueError:
+                        token = Symbol(token)
             if expr_stack:
                 expr_stack[-1] = (token, expr_stack[-1])
             else:
