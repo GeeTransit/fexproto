@@ -1,1 +1,1 @@
-python fexpron.py add.lisp
+python test_fexpron.py
