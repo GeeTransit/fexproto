@@ -1,6 +1,7 @@
 # wraps a function with zero, one, or more layers of argument evaluation
 class Combiner:
     def __init__(self, num_wraps, func):
+        assert num_wraps >= 0, f'expected non-negative wrap count, got {num_wraps}'
         self.num_wraps = num_wraps
         assert callable(func), f'combiner function is not callable: {func}'
         self.func = func
