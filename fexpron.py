@@ -33,6 +33,7 @@ _DEFAULT_ENV = {
     "$vau": Combiner(0, lambda env, expr: Combiner(0, lambda dyn, args: f_eval({**env, expr[0][0]: dyn, expr[0][1][0]: args}, expr[1][0]))),
     "eval": Combiner(1, lambda env, expr: f_eval(expr[0], expr[1][0])),
     "wrap": Combiner(1, lambda env, expr: Combiner(expr[0].num_wraps + 1, expr[0].func)),
+    "unwrap": Combiner(1, lambda env, expr: Combiner(expr[0].num_wraps - 1, expr[0].func)),
     "$define!": Combiner(0, lambda env, expr: env.__setitem__(expr[0], f_eval(env, expr[1][0]))),
     "$car": Combiner(0, lambda env, expr: expr[0][0]),
     "$cdr": Combiner(0, lambda env, expr: expr[0][1]),
