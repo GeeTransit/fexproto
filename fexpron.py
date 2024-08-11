@@ -5,7 +5,7 @@ def f_eval(env, expr):
         return env[expr[0]](env, expr[1])
 
 _DEFAULT_ENV = {
-    "+": lambda env, expr: int(expr[0]) + int(expr[1][0])
+    "+": lambda env, expr: expr[0] + expr[1][0]
 }
 
 def main(env=_DEFAULT_ENV):
@@ -28,6 +28,15 @@ def main(env=_DEFAULT_ENV):
             else:
                 print(f_eval(env, expr))
         else:
+            try:
+                token = float(token)
+            except ValueError:
+                pass
+            else:
+                try:
+                    token = int(token)
+                except ValueError:
+                    pass
             if expr_stack:
                 expr_stack[-1] = (token, expr_stack[-1])
             else:
