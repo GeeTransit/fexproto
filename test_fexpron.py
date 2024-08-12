@@ -8,8 +8,8 @@ tokens = fx.tokenize(r'''
 ($define! std
     (($vau (e a)
         ((wrap ($vau (e a) (car (cdr a))))
-            ($define! env (load "std.lisp"))
-            ($vau (e a) (eval env (car a)))))))
+            (load "std.lisp")
+            ($vau (e a) (eval (($vau (e a) e)) (car a)))))))
 ((std car) ($car ( (a b c) )))
 ($define! (temp1 (#ignore temp2)) ($car ((a (b c)))))
 temp1

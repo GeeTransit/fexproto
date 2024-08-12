@@ -49,7 +49,6 @@ def _f_load(env, expr):
         exit(e)
     for expr in exprs:
         f_eval(env, expr)
-    return env
 
 # modify environment according to name
 def _f_define(env, name, expr):
