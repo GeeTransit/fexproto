@@ -66,9 +66,15 @@ def _f_define(env, name, expr):
     else:
         exit(f'unknown match type: {name}')
 
+def _f_vau(env, envname, name, body):
+    def _f_call_vau(dyn, arg):
+        call_env = {**env, envname.name: dyn, name.name: arg}
+        return f_eval(call_env, body[0])
+    return Combiner(0, _f_call_vau)
+
 _DEFAULT_ENV = {
     "+": Combiner(1, lambda env, expr: expr[0] + expr[1][0]),
-    "$vau": Combiner(0, lambda env, expr: Combiner(0, lambda dyn, args: f_eval({**env, expr[0][0].name: dyn, expr[0][1][0].name: args}, expr[1][0]))),
+    "$vau": Combiner(0, lambda env, expr: _f_vau(env, expr[0][0], expr[0][1][0], expr[1])),
     "eval": Combiner(1, lambda env, expr: f_eval(expr[0], expr[1][0])),
     "wrap": Combiner(1, lambda env, expr: Combiner(expr[0].num_wraps + 1, expr[0].func)),
     "unwrap": Combiner(1, lambda env, expr: Combiner(expr[0].num_wraps - 1, expr[0].func)),
