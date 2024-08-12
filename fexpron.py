@@ -53,18 +53,23 @@ def _f_load(env, expr):
         f_eval(env, expr)
 
 # modify environment according to name
-def _f_define(env, name, expr):
+def _f_define(env, name, expr, *, seen=None):
+    if seen is None:
+        seen = set()
     if type(name) is Symbol:
         if name.name != "#ignore":
+            if name.name in seen:
+                exit(f'match contains duplicate name: {name.name}')
             env[name.name] = expr
+            seen.add(name.name)
     elif name is None:
         if expr is not None:
             exit(f'expected nil match, got: {expr}')
     elif type(name) is tuple:
         if type(expr) is not tuple:
             exit(f'expected cons match on {name}, got: {expr}')
-        _f_define(env, name[0], expr[0])
-        _f_define(env, name[1], expr[1])
+        _f_define(env, name[0], expr[0], seen=seen)
+        _f_define(env, name[1], expr[1], seen=seen)
     else:
         exit(f'unknown match type: {name}')
 
