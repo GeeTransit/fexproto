@@ -51,13 +51,29 @@ def _f_load(env, expr):
         f_eval(env, expr)
     return env
 
+# modify environment according to name
+def _f_define(env, name, expr):
+    if type(name) is Symbol:
+        if name.name != "#ignore":
+            env[name.name] = expr
+    elif name is None:
+        if expr is not None:
+            exit(f'expected nil match, got: {expr}')
+    elif type(name) is tuple:
+        if type(expr) is not tuple:
+            exit(f'expected cons match on {name}, got: {expr}')
+        _f_define(env, name[0], expr[0])
+        _f_define(env, name[1], expr[1])
+    else:
+        exit(f'unknown match type: {name}')
+
 _DEFAULT_ENV = {
     "+": Combiner(1, lambda env, expr: expr[0] + expr[1][0]),
     "$vau": Combiner(0, lambda env, expr: Combiner(0, lambda dyn, args: f_eval({**env, expr[0][0].name: dyn, expr[0][1][0].name: args}, expr[1][0]))),
     "eval": Combiner(1, lambda env, expr: f_eval(expr[0], expr[1][0])),
     "wrap": Combiner(1, lambda env, expr: Combiner(expr[0].num_wraps + 1, expr[0].func)),
     "unwrap": Combiner(1, lambda env, expr: Combiner(expr[0].num_wraps - 1, expr[0].func)),
-    "$define!": Combiner(0, lambda env, expr: env.__setitem__(expr[0].name, f_eval(env, expr[1][0]))),
+    "$define!": Combiner(0, lambda env, expr: _f_define(env, expr[0], f_eval(env, expr[1][0]))),
     "$car": Combiner(0, lambda env, expr: expr[0][0]),
     "$cdr": Combiner(0, lambda env, expr: expr[0][1]),
     "load": Combiner(1, lambda env, expr: _f_load(env, expr[0])),

@@ -11,9 +11,12 @@ tokens = fx.tokenize(r'''
             ($define! env (load "std.lisp"))
             ($vau (e a) (eval env (car a)))))))
 ((std car) ($car ( (a b c) )))
+($define! (temp1 (#ignore temp2)) ($car ((a (b c)))))
+temp1
+temp2
 ''')
 exprs = fx.parse(tokens)
-for expr, expected in zip(exprs, [..., 7, 5, 10, fx.Symbol("a"), ..., fx.Symbol("a")]):
+for expr, expected in zip(exprs, [..., 7, 5, 10, fx.Symbol("a"), ..., fx.Symbol("a"), None, fx.Symbol("a"), fx.Symbol("c")]):
     actual = fx.f_eval(fx._DEFAULT_ENV, expr)
     if expected is ...:
         continue
