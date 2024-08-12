@@ -60,7 +60,7 @@ _DEFAULT_ENV = {
     "$define!": Combiner(0, lambda env, expr: env.__setitem__(expr[0].name, f_eval(env, expr[1][0]))),
     "$car": Combiner(0, lambda env, expr: expr[0][0]),
     "$cdr": Combiner(0, lambda env, expr: expr[0][1]),
-    "load": Combiner(1, lambda env, expr: _f_load(expr[0], expr[1][0])),
+    "load": Combiner(1, lambda env, expr: _f_load(env, expr[0])),
 }
 
 def tokenize(text):
