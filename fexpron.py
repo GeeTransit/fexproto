@@ -67,8 +67,9 @@ def _f_define(env, name, expr):
         exit(f'unknown match type: {name}')
 
 def _f_vau(env, envname, name, body):
-    def _f_call_vau(dyn, arg):
-        call_env = {**env, envname.name: dyn, name.name: arg}
+    def _f_call_vau(dyn, args):
+        call_env = env.copy()
+        _f_define(call_env, (envname, (name, None)), (dyn, (args, None)))
         return f_eval(call_env, body[0])
     return Combiner(0, _f_call_vau)
 
