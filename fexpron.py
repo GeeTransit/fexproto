@@ -6,20 +6,9 @@ class Combiner:
         assert callable(func), f'combiner function is not callable: {func}'
         self.func = func
 
-# can be resolved in an environment or used for identity
-class Symbol:
-    def __init__(self, name):
-        self.name = name.lower()
-    def __hash__(self):
-        return hash(self.name)
-    def __eq__(self, other):
-        return isinstance(other, Symbol) and self.name == other.name
-    def __repr__(self):
-        return f'{type(self).__name__}({self.name!r})'
-
 def f_eval(env, expr):
-    if type(expr) is Symbol:
-        return env[expr.name]
+    if type(expr) is str:
+        return env[expr]
     elif type(expr) is tuple:
         name, args = expr
         combiner = f_eval(env, name)
@@ -56,11 +45,11 @@ def _f_load(env, expr):
 def _f_define(env, name, expr, *, seen=None):
     if seen is None:
         seen = set()
-    if type(name) is Symbol:
-        if name.name in seen:
-            exit(f'match contains duplicate name: {name.name}')
-        env[name.name] = expr
-        seen.add(name.name)
+    if type(name) is str:
+        if name in seen:
+            exit(f'match contains duplicate name: {name}')
+        env[name] = expr
+        seen.add(name)
     elif name is ...:
         pass
     elif name is None:
@@ -102,7 +91,7 @@ _DEFAULT_ENV = {
     "$if": Combiner(0, lambda env, expr: _f_if(env, expr[0], expr[1][0], expr[1][1][0])),
     "eq?": Combiner(1, lambda env, expr:
         expr[0] == expr[1][0]
-        if type(expr[0]) is type(expr[1][0]) in (Symbol, int, float, bytes)
+        if type(expr[0]) is type(expr[1][0]) in (str, int, float, bytes)
         else expr[0] is expr[1][0]
     ),
 }
@@ -138,12 +127,12 @@ def parse(tokens):
                 try:
                     token = float(token)
                 except ValueError:
-                    token = Symbol(token)
+                    token = token.lower()
                 else:
                     try:
                         token = int(token)
                     except ValueError:
-                        token = Symbol(token)
+                        token = token.lower()
             if expr_stack:
                 expr_stack[-1] = (token, expr_stack[-1])
             else:
