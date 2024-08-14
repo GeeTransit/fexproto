@@ -26,7 +26,7 @@ def f_eval(env, expr):
         for _ in range(combiner.num_wraps):
             args = _f_evlis(env, args)
         return combiner.func(env, args)
-    elif type(expr) in (int, float, Combiner, str, type(...)):
+    elif type(expr) in (int, float, Combiner, str, type(...), bool):
         return expr
     else:
         exit(f'unknown expression type: {expr}')
@@ -81,6 +81,14 @@ def _f_vau(env, envname, name, body):
         return f_eval(call_env, body[0])
     return Combiner(0, _f_call_vau)
 
+def _f_if(env, condition, on_true, on_false):
+    result = f_eval(env, condition)
+    if result is True:
+        return f_eval(env, on_true)
+    if result is False:
+        return f_eval(env, on_false)
+    exit(f'expected #t or #f as condition for $if, got: {result}')
+
 _DEFAULT_ENV = {
     "+": Combiner(1, lambda env, expr: expr[0] + expr[1][0]),
     "$vau": Combiner(0, lambda env, expr: _f_vau(env, expr[0][0], expr[0][1][0], expr[1])),
@@ -91,6 +99,12 @@ _DEFAULT_ENV = {
     "$car": Combiner(0, lambda env, expr: expr[0][0]),
     "$cdr": Combiner(0, lambda env, expr: expr[0][1]),
     "load": Combiner(1, lambda env, expr: _f_load(env, expr[0])),
+    "$if": Combiner(0, lambda env, expr: _f_if(env, expr[0], expr[1][0], expr[1][1][0])),
+    "eq?": Combiner(1, lambda env, expr:
+        expr[0] == expr[1][0]
+        if type(expr[0]) is type(expr[1][0]) is Symbol
+        else expr[0] is expr[1][0]
+    ),
 }
 
 def tokenize(text):
@@ -118,6 +132,8 @@ def parse(tokens):
                 token = token[1:-1].encode("raw_unicode_escape").decode("unicode_escape")
             elif token == "#ignore":
                 token = ...
+            elif token in ("#t", "#f"):
+                token = token == "#t"
             else:
                 try:
                     token = float(token)

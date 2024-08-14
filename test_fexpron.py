@@ -14,9 +14,11 @@ tokens = fx.tokenize(r'''
 ($define! (temp1 (#ignore temp2)) ($car ((a (b c)))))
 temp1
 temp2
+($if (eq? ($car (a)) ($car (a))) 1 0)
+($if (eq? #f (eq? #ignore #ignore)) 1 0)
 ''')
 exprs = fx.parse(tokens)
-for expr, expected in zip(exprs, [..., 7, 5, 10, fx.Symbol("a"), ..., fx.Symbol("a"), None, fx.Symbol("a"), fx.Symbol("c")]):
+for expr, expected in zip(exprs, [..., 7, 5, 10, fx.Symbol("a"), ..., fx.Symbol("a"), None, fx.Symbol("a"), fx.Symbol("c"), 1, 0]):
     actual = fx.f_eval(fx._DEFAULT_ENV, expr)
     if expected is ...:
         continue
