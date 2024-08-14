@@ -26,7 +26,7 @@ def f_eval(env, expr):
         for _ in range(combiner.num_wraps):
             args = _f_evlis(env, args)
         return combiner.func(env, args)
-    elif type(expr) in (int, float, Combiner, str, type(...), bool):
+    elif type(expr) in (int, float, Combiner, bytes, type(...), bool):
         return expr
     else:
         exit(f'unknown expression type: {expr}')
@@ -42,7 +42,7 @@ def _f_evlis(env, expr):
 
 # load a file in an environment
 def _f_load(env, expr):
-    with open(expr) as file:
+    with open(expr.decode("utf-8")) as file:
         text = file.read()
     tokens = tokenize(text)
     try:
@@ -102,7 +102,7 @@ _DEFAULT_ENV = {
     "$if": Combiner(0, lambda env, expr: _f_if(env, expr[0], expr[1][0], expr[1][1][0])),
     "eq?": Combiner(1, lambda env, expr:
         expr[0] == expr[1][0]
-        if type(expr[0]) is type(expr[1][0]) in (Symbol, int, float, str)
+        if type(expr[0]) is type(expr[1][0]) in (Symbol, int, float, bytes)
         else expr[0] is expr[1][0]
     ),
 }
@@ -129,7 +129,7 @@ def parse(tokens):
                 exprs.append(expr)
         else:
             if token[0] == '"' and token[-1] == '"' and len(token) >= 2:
-                token = token[1:-1].encode("raw_unicode_escape").decode("unicode_escape")
+                token = token[1:-1].encode("raw_unicode_escape").decode("unicode_escape").encode("utf-8")
             elif token == "#ignore":
                 token = ...
             elif token in ("#t", "#f"):
