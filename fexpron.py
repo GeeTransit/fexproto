@@ -9,7 +9,7 @@ class Combiner:
 # can be resolved in an environment or used for identity
 class Symbol:
     def __init__(self, name):
-        self.name = name
+        self.name = name.lower()
     def __hash__(self):
         return hash(self.name)
     def __eq__(self, other):
