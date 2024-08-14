@@ -57,11 +57,12 @@ def _f_define(env, name, expr, *, seen=None):
     if seen is None:
         seen = set()
     if type(name) is Symbol:
-        if name.name != "#ignore":
-            if name.name in seen:
-                exit(f'match contains duplicate name: {name.name}')
-            env[name.name] = expr
-            seen.add(name.name)
+        if name.name in seen:
+            exit(f'match contains duplicate name: {name.name}')
+        env[name.name] = expr
+        seen.add(name.name)
+    elif name is ...:
+        pass
     elif name is None:
         if expr is not None:
             exit(f'expected nil match, got: {expr}')
@@ -115,6 +116,8 @@ def parse(tokens):
         else:
             if token[0] == '"' and token[-1] == '"' and len(token) >= 2:
                 token = token[1:-1].encode("raw_unicode_escape").decode("unicode_escape")
+            elif token == "#ignore":
+                token = ...
             else:
                 try:
                     token = float(token)
