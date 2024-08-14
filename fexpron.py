@@ -15,7 +15,7 @@ def f_eval(env, expr):
         for _ in range(combiner.num_wraps):
             args = _f_evlis(env, args)
         return combiner.func(env, args)
-    elif type(expr) in (int, float, Combiner, bytes, type(...), bool):
+    elif type(expr) in (int, float, Combiner, bytes, type(...), bool, type(None)):
         return expr
     else:
         exit(f'unknown expression type: {expr}')
