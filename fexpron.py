@@ -12,6 +12,8 @@ def f_eval(env, expr):
     continuation, value = (env, expr, None), None
     while True:
         continuation, value = step_evaluate(continuation, value)
+        if continuation is Exception:
+            raise ValueError(value)
         if continuation is None:
             return value
 
@@ -31,7 +33,7 @@ def step_evaluate(continuation, value):
     elif callable(expr):
         return expr(env, value, parent=parent)
     else:
-        exit(f'unknown expression type: {expr}')
+        return Exception, f'unknown expression type: {expr}'
 
 # evaluate arguments based on num_wraps
 def _step_call_wrapped(env, combiner, parent, args=None):
@@ -68,7 +70,7 @@ def _f_load(env, expr, *, parent=None):
     try:
         exprs = parse(tokens)
     except ValueError as e:
-        exit(e)
+        return Exception, repr(e)
     args = None
     for expr in reversed(exprs): args = expr, args
     continuation = env, None, parent
@@ -81,22 +83,22 @@ def _f_define(env, expr, name, *, seen=None, parent=None, _sendval=None):
         seen = set()
     if type(name) is str:
         if name in seen:
-            exit(f'match contains duplicate name: {name}')
+            return Exception, f'match contains duplicate name: {name}'
         env[name] = expr
         seen.add(name)
     elif name is ...:
         pass
     elif name is None:
         if expr is not None:
-            exit(f'expected nil match, got: {expr}')
+            return Exception, f'expected nil match, got: {expr}'
     elif type(name) is tuple:
         if type(expr) is not tuple:
-            exit(f'expected cons match on {name}, got: {expr}')
+            return Exception, f'expected cons match on {name}, got: {expr}'
         continuation = env, partial(_f_define, name=name[1], seen=seen, _sendval=_sendval), parent
         continuation = env, partial(_f_define, name=name[0], seen=seen, _sendval=expr[1]), continuation
         return continuation, expr[0]
     else:
-        exit(f'unknown match type: {name}')
+        return Exception, f'unknown match type: {name}'
     return parent, _sendval
 
 def _f_vau(env, envname, name, body):
@@ -112,7 +114,7 @@ def _f_if(env, result, on_true, on_false, *, parent=None):
         return (env, on_true, parent), None
     if result is False:
         return (env, on_false, parent), None
-    exit(f'expected #t or #f as condition for $if, got: {result}')
+    return Exception, f'expected #t or #f as condition for $if, got: {result}'
 
 _DEFAULT_ENV = {
     "+": Combiner(1, lambda env, expr, parent: (parent, expr[0] + expr[1][0])),
@@ -191,6 +193,8 @@ def main(env=_DEFAULT_ENV):
         continuation, value = (env, expr, None), None
         while True:
             continuation, value = step_evaluate(continuation, value)
+            if continuation is Exception:
+                exit(value)
             if continuation is None:
                 break
         pprint.pp(value)
