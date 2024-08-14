@@ -16,9 +16,12 @@ temp1
 temp2
 ($if (eq? ($car (a)) ($car (a))) 1 0)
 ($if (eq? #f (eq? #ignore #ignore)) 1 0)
+(eq? 3 (+ 1 2))
+(eq? 3.5 (+ 3 0.5))
+(eq? "hi" "hi")
 ''')
 exprs = fx.parse(tokens)
-for expr, expected in zip(exprs, [..., 7, 5, 10, fx.Symbol("a"), ..., fx.Symbol("a"), None, fx.Symbol("a"), fx.Symbol("c"), 1, 0]):
+for expr, expected in zip(exprs, [..., 7, 5, 10, fx.Symbol("a"), ..., fx.Symbol("a"), None, fx.Symbol("a"), fx.Symbol("c"), 1, 0, True, True, True]):
     actual = fx.f_eval(fx._DEFAULT_ENV, expr)
     if expected is ...:
         continue

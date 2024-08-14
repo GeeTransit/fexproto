@@ -102,7 +102,7 @@ _DEFAULT_ENV = {
     "$if": Combiner(0, lambda env, expr: _f_if(env, expr[0], expr[1][0], expr[1][1][0])),
     "eq?": Combiner(1, lambda env, expr:
         expr[0] == expr[1][0]
-        if type(expr[0]) is type(expr[1][0]) is Symbol
+        if type(expr[0]) is type(expr[1][0]) in (Symbol, int, float, str)
         else expr[0] is expr[1][0]
     ),
 }
