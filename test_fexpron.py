@@ -10,7 +10,7 @@ tokens = fx.tokenize(r'''
         ((wrap ($vau (e (#ignore std)) std))
             (load "std.lisp")
             ($vau (e (a)) (eval (($vau (e a) e)) a))))))
-((std car) ($car ( (a b c) )))
+((std $car) (a b c))
 ($define! (temp1 (#ignore temp2)) ($car ((a (b c)))))
 temp1
 temp2

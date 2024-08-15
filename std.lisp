@@ -1,2 +1,2 @@
-($define! car (wrap $car))
-($define! cdr (wrap $cdr))
+($define! $car (unwrap car))
+($define! $cdr (unwrap cdr))
