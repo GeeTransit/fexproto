@@ -8,8 +8,16 @@ class Combiner:
         assert callable(func), f'combiner function is not callable: {func}'
         self.func = func
 
+class Continuation:
+    def __init__(self, env, expr, parent):
+        assert type(env) is dict, f'env must be type dict, got: {type(env)}'
+        self.env = env
+        self.expr = expr
+        assert parent is None or type(parent) is Continuation, f'parent must be None or type Continuation, got: {type(parent)}'
+        self.parent = parent
+
 def f_eval(env, expr):
-    continuation, value = (env, expr, None), None
+    continuation, value = Continuation(env, expr, None), None
     while True:
         continuation, value = step_evaluate(continuation, value)
         if continuation is Exception:
@@ -19,14 +27,16 @@ def f_eval(env, expr):
 
 # given a continuation and a value, get the next continuation and value
 def step_evaluate(continuation, value):
-    env, expr, parent = continuation
+    env = continuation.env
+    expr = continuation.expr
+    parent = continuation.parent
     if type(expr) is str:
         return parent, env[expr]
     elif type(expr) is tuple:
         name, args = expr
         # evaluate car of call
-        continuation = env, partial(_step_call_wrapped, args=args), parent
-        continuation = env, name, continuation
+        continuation = Continuation(env, partial(_step_call_wrapped, args=args), parent)
+        continuation = Continuation(env, name, continuation)
         return continuation, None
     elif type(expr) in (int, float, Combiner, bytes, type(...), bool, type(None)):
         return parent, expr
@@ -37,15 +47,15 @@ def step_evaluate(continuation, value):
 
 # evaluate arguments based on num_wraps
 def _step_call_wrapped(env, combiner, parent, args=None):
-    continuation = env, combiner.func, parent
-    continuation = env, partial(_step_call_evlis, num_wraps=combiner.num_wraps), continuation
+    continuation = Continuation(env, combiner.func, parent)
+    continuation = Continuation(env, partial(_step_call_evlis, num_wraps=combiner.num_wraps), continuation)
     return continuation, args
 
 # evaluate each element in the list
 def _step_call_evlis(env, args, parent, num_wraps=1):
     if num_wraps > 0:
-        continuation = env, partial(_step_call_evlis, num_wraps=num_wraps - 1), parent
-        continuation = env, partial(_step_call_evcar, pending=args), continuation
+        continuation = Continuation(env, partial(_step_call_evlis, num_wraps=num_wraps - 1), parent)
+        continuation = Continuation(env, partial(_step_call_evcar, pending=args), continuation)
         return continuation, None
     else:
         return parent, args
@@ -54,8 +64,8 @@ def _step_call_evcar(env, value, parent, pending=None, done=None):
     done = (value, done)
     if pending is not None:
         # append the previous result and evaluate the next element
-        continuation = env, partial(_step_call_evcar, pending=pending[1], done=done), parent
-        continuation = env, pending[0], continuation
+        continuation = Continuation(env, partial(_step_call_evcar, pending=pending[1], done=done), parent)
+        continuation = Continuation(env, pending[0], continuation)
         return continuation, None
     else:
         args = None
@@ -73,8 +83,8 @@ def _f_load(env, expr, *, parent=None):
         return Exception, repr(e)
     args = None
     for expr in reversed(exprs): args = expr, args
-    continuation = env, None, parent
-    continuation = env, _step_call_evlis, continuation
+    continuation = Continuation(env, None, parent)
+    continuation = Continuation(env, _step_call_evlis, continuation)
     return continuation, args
 
 # modify environment according to name
@@ -94,8 +104,8 @@ def _f_define(env, expr, name, *, seen=None, parent=None, _sendval=None):
     elif type(name) is tuple:
         if type(expr) is not tuple:
             return Exception, f'expected cons match on {name}, got: {expr}'
-        continuation = env, partial(_f_define, name=name[1], seen=seen, _sendval=_sendval), parent
-        continuation = env, partial(_f_define, name=name[0], seen=seen, _sendval=expr[1]), continuation
+        continuation = Continuation(env, partial(_f_define, name=name[1], seen=seen, _sendval=_sendval), parent)
+        continuation = Continuation(env, partial(_f_define, name=name[0], seen=seen, _sendval=expr[1]), continuation)
         return continuation, expr[0]
     else:
         return Exception, f'unknown match type: {name}'
@@ -104,29 +114,29 @@ def _f_define(env, expr, name, *, seen=None, parent=None, _sendval=None):
 def _f_vau(env, envname, name, body):
     def _f_call_vau(dyn, args, parent):
         call_env = env.copy()
-        continuation = call_env, body[0], parent
-        continuation = call_env, partial(_f_define, name=(envname, (name, None))), continuation
+        continuation = Continuation(call_env, body[0], parent)
+        continuation = Continuation(call_env, partial(_f_define, name=(envname, (name, None))), continuation)
         return continuation, (dyn, (args, None))
     return Combiner(0, _f_call_vau)
 
 def _f_if(env, result, on_true, on_false, *, parent=None):
     if result is True:
-        return (env, on_true, parent), None
+        return Continuation(env, on_true, parent), None
     if result is False:
-        return (env, on_false, parent), None
+        return Continuation(env, on_false, parent), None
     return Exception, f'expected #t or #f as condition for $if, got: {result}'
 
 _DEFAULT_ENV = {
     "+": Combiner(1, lambda env, expr, parent: (parent, expr[0] + expr[1][0])),
     "$vau": Combiner(0, lambda env, expr, parent: (parent, _f_vau(env, expr[0][0], expr[0][1][0], expr[1]))),
-    "eval": Combiner(1, lambda env, expr, parent: ((expr[0], expr[1][0], parent), None)),
+    "eval": Combiner(1, lambda env, expr, parent: (Continuation(expr[0], expr[1][0], parent), None)),
     "wrap": Combiner(1, lambda env, expr, parent: (parent, Combiner(expr[0].num_wraps + 1, expr[0].func))),
     "unwrap": Combiner(1, lambda env, expr, parent: (parent, Combiner(expr[0].num_wraps - 1, expr[0].func))),
-    "$define!": Combiner(0, lambda env, expr, parent: ((env, expr[1][0], (env, partial(_f_define, name=expr[0]), parent)), None)),
+    "$define!": Combiner(0, lambda env, expr, parent: (Continuation(env, expr[1][0], Continuation(env, partial(_f_define, name=expr[0]), parent)), None)),
     "$car": Combiner(0, lambda env, expr, parent: (parent, expr[0][0])),
     "$cdr": Combiner(0, lambda env, expr, parent: (parent, expr[0][1])),
-    "load": Combiner(1, lambda env, expr, parent: ((env, _f_load, parent), expr[0])),
-    "$if": Combiner(0, lambda env, expr, parent: ((env, expr[0], (env, partial(_f_if, on_true=expr[1][0], on_false=expr[1][1][0]), parent)), None)),
+    "load": Combiner(1, lambda env, expr, parent: (Continuation(env, _f_load, parent), expr[0])),
+    "$if": Combiner(0, lambda env, expr, parent: (Continuation(env, expr[0], Continuation(env, partial(_f_if, on_true=expr[1][0], on_false=expr[1][1][0]), parent)), None)),
     "eq?": Combiner(1, lambda env, expr, parent: (parent,
         expr[0] == expr[1][0]
         if type(expr[0]) is type(expr[1][0]) in (str, int, float, bytes)
@@ -190,7 +200,7 @@ def main(env=_DEFAULT_ENV):
     except ValueError as e:
         exit(e)
     for expr in exprs:
-        continuation, value = (env, expr, None), None
+        continuation, value = Continuation(env, expr, None), None
         while True:
             continuation, value = step_evaluate(continuation, value)
             if continuation is Exception:
