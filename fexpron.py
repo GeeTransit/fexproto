@@ -8,15 +8,23 @@ class Combiner:
         assert callable(func), f'combiner function is not callable: {func}'
         self.func = func
 
+class Environment:
+    def __init__(self, bindings, parent):
+        assert type(bindings) is dict, f'bindings must be dict, got: {type(bindings)}'
+        self.bindings = bindings
+        assert parent is None or type(parent) is Environment, f'parent must be None or type Environment, got: {type(parent)}'
+        self.parent = parent
+
 class Continuation:
     def __init__(self, env, expr, parent):
-        assert type(env) is dict, f'env must be type dict, got: {type(env)}'
+        assert type(env) is Environment, f'env must be type Environment, got: {type(env)}'
         self.env = env
         self.expr = expr
         assert parent is None or type(parent) is Continuation, f'parent must be None or type Continuation, got: {type(parent)}'
         self.parent = parent
 
 def f_eval(env, expr):
+    env = Environment(env, None)
     continuation, value = Continuation(env, expr, None), None
     while True:
         continuation, value = step_evaluate(continuation, value)
@@ -31,7 +39,11 @@ def step_evaluate(continuation, value):
     expr = continuation.expr
     parent = continuation.parent
     if type(expr) is str:
-        return parent, env[expr]
+        while env is not None:
+            if expr in env.bindings:
+                return parent, env.bindings[expr]
+            env = env.parent
+        return Exception, f'binding not found: {expr}'
     elif type(expr) is tuple:
         name, args = expr
         # evaluate car of call
@@ -94,7 +106,7 @@ def _f_define(env, expr, name, *, seen=None, parent=None, _sendval=None):
     if type(name) is str:
         if name in seen:
             return Exception, f'match contains duplicate name: {name}'
-        env[name] = expr
+        env.bindings[name] = expr
         seen.add(name)
     elif name is ...:
         pass
@@ -113,7 +125,7 @@ def _f_define(env, expr, name, *, seen=None, parent=None, _sendval=None):
 
 def _f_vau(env, envname, name, body):
     def _f_call_vau(dyn, args, parent):
-        call_env = env.copy()
+        call_env = Environment({}, env)
         continuation = Continuation(call_env, body[0], parent)
         continuation = Continuation(call_env, partial(_f_define, name=(envname, (name, None))), continuation)
         return continuation, (dyn, (args, None))
@@ -189,7 +201,7 @@ def parse(tokens):
         raise ValueError(f'unclosed expression: {expr_stack}')
     return exprs
 
-def main(env=_DEFAULT_ENV):
+def main(env=None):
     import pprint
     import sys
     with open(sys.argv[1] if len(sys.argv) >= 2 else 0) as file:
@@ -199,6 +211,9 @@ def main(env=_DEFAULT_ENV):
         exprs = parse(tokens)
     except ValueError as e:
         exit(e)
+    if env is None:
+        env = _DEFAULT_ENV.copy()
+    env = Environment(env, None)
     for expr in exprs:
         continuation, value = Continuation(env, expr, None), None
         while True:
