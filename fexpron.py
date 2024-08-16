@@ -147,6 +147,7 @@ _DEFAULT_ENV = {
     "$define!": Combiner(0, lambda env, expr, parent: (Continuation(env, expr[1][0], Continuation(env, partial(_f_define, name=expr[0]), parent)), None)),
     "car": Combiner(1, lambda env, expr, parent: (parent, expr[0][0])),
     "cdr": Combiner(1, lambda env, expr, parent: (parent, expr[0][1])),
+    "cons": Combiner(1, lambda env, expr, parent: (parent, (expr[0], expr[1][0]))),
     "load": Combiner(1, lambda env, expr, parent: (Continuation(env, _f_load, parent), expr[0])),
     "$if": Combiner(0, lambda env, expr, parent: (Continuation(env, expr[0], Continuation(env, partial(_f_if, on_true=expr[1][0], on_false=expr[1][1][0]), parent)), None)),
     "eq?": Combiner(1, lambda env, expr, parent: (parent,
