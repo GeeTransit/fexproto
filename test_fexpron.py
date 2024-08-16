@@ -20,10 +20,22 @@ temp2
 (eq? 3.5 (+ 3 0.5))
 (eq? "hi" "hi")
 (cons 4 6)
+($define! reverse
+    (wrap
+        ($vau (e (a))
+            ((wrap ($vau (e (a b)) b))
+                ($define! reverse-tail
+                    (wrap
+                        ($vau (e (in out))
+                            ($if (eq? in ())
+                                out
+                                (reverse-tail (cdr in) (cons (car in) out))))))
+                (reverse-tail a ())))))
+((unwrap reverse) (3 2 1))
 ''')
 exprs = fx.parse(tokens)
 env = fx._DEFAULT_ENV.copy()
-for expr, expected in zip(exprs, [None, 7, 5, 10, "a", ..., "a", None, "a", "c", 1, 0, True, True, True, (4, 6)]):
+for expr, expected in zip(exprs, [None, 7, 5, 10, "a", ..., "a", None, "a", "c", 1, 0, True, True, True, (4, 6), None, (1, (2, (3, None)))]):
     actual = fx.f_eval(env, expr)
     if expected is ...:
         continue
