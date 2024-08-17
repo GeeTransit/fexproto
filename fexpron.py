@@ -123,13 +123,14 @@ def _f_define(env, expr, name, *, seen=None, parent=None, _sendval=None):
         return Exception, f'unknown match type: {name}'
     return parent, _sendval
 
+def _f_call_vau(dyn, args, parent, *, env, envname, name, body):
+    call_env = Environment({}, env)
+    continuation = Continuation(call_env, body[0], parent)
+    continuation = Continuation(call_env, partial(_f_define, name=(envname, (name, None))), continuation)
+    return continuation, (dyn, (args, None))
+
 def _f_vau(env, envname, name, body):
-    def _f_call_vau(dyn, args, parent):
-        call_env = Environment({}, env)
-        continuation = Continuation(call_env, body[0], parent)
-        continuation = Continuation(call_env, partial(_f_define, name=(envname, (name, None))), continuation)
-        return continuation, (dyn, (args, None))
-    return Combiner(0, _f_call_vau)
+    return Combiner(0, partial(_f_call_vau, env=env, envname=envname, name=name, body=body))
 
 def _f_if(env, result, on_true, on_false, *, parent=None):
     if result is True:
