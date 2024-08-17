@@ -138,23 +138,65 @@ def _f_if(env, result, on_true, on_false, *, parent=None):
         return Continuation(env, on_false, parent), None
     return Exception, f'expected #t or #f as condition for $if, got: {result}'
 
-_DEFAULT_ENV = {
-    "+": Combiner(1, lambda env, expr, parent: (parent, expr[0] + expr[1][0])),
-    "$vau": Combiner(0, lambda env, expr, parent: (parent, _f_vau(env, expr[0][0], expr[0][1][0], expr[1]))),
-    "eval": Combiner(1, lambda env, expr, parent: (Continuation(expr[0], expr[1][0], parent), None)),
-    "wrap": Combiner(1, lambda env, expr, parent: (parent, Combiner(expr[0].num_wraps + 1, expr[0].func))),
-    "unwrap": Combiner(1, lambda env, expr, parent: (parent, Combiner(expr[0].num_wraps - 1, expr[0].func))),
-    "$define!": Combiner(0, lambda env, expr, parent: (Continuation(env, expr[1][0], Continuation(env, partial(_f_define, name=expr[0]), parent)), None)),
-    "car": Combiner(1, lambda env, expr, parent: (parent, expr[0][0])),
-    "cdr": Combiner(1, lambda env, expr, parent: (parent, expr[0][1])),
-    "cons": Combiner(1, lambda env, expr, parent: (parent, (expr[0], expr[1][0]))),
-    "load": Combiner(1, lambda env, expr, parent: (Continuation(env, _f_load, parent), expr[0])),
-    "$if": Combiner(0, lambda env, expr, parent: (Continuation(env, expr[0], Continuation(env, partial(_f_if, on_true=expr[1][0], on_false=expr[1][1][0]), parent)), None)),
-    "eq?": Combiner(1, lambda env, expr, parent: (parent,
+def _operative_plus(env, expr, parent):
+    return parent, expr[0] + expr[1][0]
+
+def _operative_vau(env, expr, parent):
+    return parent, _f_vau(env, expr[0][0], expr[0][1][0], expr[1])
+
+def _operative_eval(env, expr, parent):
+    continuation = Continuation(expr[0], expr[1][0], parent)
+    return continuation, None
+
+def _operative_wrap(env, expr, parent):
+    return parent, Combiner(expr[0].num_wraps + 1, expr[0].func)
+
+def _operative_unwrap(env, expr, parent):
+    return parent, Combiner(expr[0].num_wraps - 1, expr[0].func)
+
+def _operative_define(env, expr, parent):
+    continuation = Continuation(env, partial(_f_define, name=expr[0]), parent)
+    continuation = Continuation(env, expr[1][0], continuation)
+    return continuation, None
+
+def _operative_car(env, expr, parent):
+    return parent, expr[0][0]
+
+def _operative_cdr(env, expr, parent):
+    return parent, expr[0][1]
+
+def _operative_cons(env, expr, parent):
+    return parent, (expr[0], expr[1][0])
+
+def _operative_load(env, expr, parent):
+    continuation = Continuation(env, _f_load, parent)
+    return continuation, expr[0]
+
+def _operative_if(env, expr, parent):
+    continuation = Continuation(env, partial(_f_if, on_true=expr[1][0], on_false=expr[1][1][0]), parent)
+    continuation = Continuation(env, expr[0], continuation)
+    return continuation, None
+
+def _operative_eq(env, expr, parent):
+    return (parent,
         expr[0] == expr[1][0]
         if type(expr[0]) is type(expr[1][0]) in (str, int, float, bytes)
         else expr[0] is expr[1][0]
-    )),
+    )
+
+_DEFAULT_ENV = {
+    "+": Combiner(1, _operative_plus),
+    "$vau": Combiner(0, _operative_vau),
+    "eval": Combiner(1, _operative_eval),
+    "wrap": Combiner(1, _operative_wrap),
+    "unwrap": Combiner(1, _operative_unwrap),
+    "$define!": Combiner(0, _operative_define),
+    "car": Combiner(1, _operative_car),
+    "cdr": Combiner(1, _operative_cdr),
+    "cons": Combiner(1, _operative_cons),
+    "load": Combiner(1, _operative_load),
+    "$if": Combiner(0, _operative_if),
+    "eq?": Combiner(1, _operative_eq),
 }
 
 def tokenize(text):
