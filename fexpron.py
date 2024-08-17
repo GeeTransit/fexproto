@@ -132,10 +132,14 @@ def _f_call_vau(dyn, args, parent, *, env, envname, name, body):
 def _f_vau(env, envname, name, body):
     return Combiner(0, partial(_f_call_vau, env=env, envname=envname, name=name, body=body))
 
-def _f_if(env, result, on_true, on_false, *, parent=None):
+def _f_if(env, result, parent):
     if result is True:
+        on_true = env.bindings["on_true"]
+        env = env.bindings["env"]
         return Continuation(env, on_true, parent), None
     if result is False:
+        on_false = env.bindings["on_false"]
+        env = env.bindings["env"]
         return Continuation(env, on_false, parent), None
     return Exception, f'expected #t or #f as condition for $if, got: {result}'
 
@@ -174,7 +178,8 @@ def _operative_load(env, expr, parent):
     return continuation, expr[0]
 
 def _operative_if(env, expr, parent):
-    continuation = Continuation(env, partial(_f_if, on_true=expr[1][0], on_false=expr[1][1][0]), parent)
+    next_env = Environment({"env": env, "on_true": expr[1][0], "on_false": expr[1][1][0]}, None)
+    continuation = Continuation(next_env, _f_if, parent)
     continuation = Continuation(env, expr[0], continuation)
     return continuation, None
 
