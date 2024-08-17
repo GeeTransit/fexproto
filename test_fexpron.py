@@ -3,13 +3,13 @@ tokens = fx.tokenize(r'''
 (load "std.lisp")
 (+ (+ 1 1) (+ 2 3))
 (+ 1 4)
-(($vau (e (a b)) (+ (eval e a) (eval e b))) (+ 1 3) (+ 2 4))
+(($vau (e a) (+ (eval e (car a)) (eval e (car (cdr a))))) (+ 1 3) (+ 2 4))
 ((wrap (unwrap car)) (($vau (e a) a) a b c))
 ($define! std
     (($vau (e a)
-        ((wrap ($vau (e (#ignore std)) std))
+        ((wrap ($vau (e a) (car (cdr a))))
             (load "std.lisp")
-            ($vau (e (a)) (eval (($vau (e a) e)) a))))))
+            ($vau (e a) (eval (($vau (e a) e)) (car a)))))))
 ((std $car) (a b c))
 ($define! (temp1 (#ignore temp2)) ($car ((a (b c)))))
 temp1
@@ -22,15 +22,15 @@ temp2
 (cons 4 6)
 ($define! reverse
     (wrap
-        ($vau (e (a))
-            ((wrap ($vau (e (a b)) b))
+        ($vau (e a)
+            ((wrap ($vau (e a-b) (car (cdr a-b))))
                 ($define! reverse-tail
                     (wrap
-                        ($vau (e (in out))
-                            ($if (eq? in ())
-                                out
-                                (reverse-tail (cdr in) (cons (car in) out))))))
-                (reverse-tail a ())))))
+                        ($vau (e in-out)
+                            ($if (eq? (car in-out) ())
+                                (car (cdr in-out))
+                                (reverse-tail (cdr (car in-out)) (cons (car (car in-out)) (car (cdr in-out))))))))
+                (reverse-tail (car a) ())))))
 ((unwrap reverse) (3 2 1))
 ''')
 exprs = fx.parse(tokens)

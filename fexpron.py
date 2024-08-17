@@ -124,10 +124,9 @@ def _f_define(env, expr, name, *, seen=None, parent=None, _sendval=None):
     return parent, _sendval
 
 def _f_call_vau(dyn, args, parent, *, env, envname, name, body):
-    call_env = Environment({}, env)
+    call_env = Environment({envname: dyn, name: args}, env)
     continuation = Continuation(call_env, body[0], parent)
-    continuation = Continuation(call_env, partial(_f_define, name=(envname, (name, None))), continuation)
-    return continuation, (dyn, (args, None))
+    return continuation, None
 
 def _f_vau(env, envname, name, body):
     return Combiner(0, partial(_f_call_vau, env=env, envname=envname, name=name, body=body))
