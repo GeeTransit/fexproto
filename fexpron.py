@@ -23,6 +23,23 @@ class Continuation:
         assert parent is None or type(parent) is Continuation, f'parent must be None or type Continuation, got: {type(parent)}'
         self.parent = parent
 
+class Operative:
+    def __init__(self, env, envname, name, body):
+        assert type(env) is Environment, f'env must be type Environment, got: {type(env)}'
+        self.env = env  # static environment (at time of declaration)
+        assert type(envname) is str, f'envname must be type str, got: {type(envname)}'
+        self.envname = envname  # name for dynamic environment
+        assert type(name) is str, f'name must be type str, got: {type(name)}'
+        self.name = name  # name for call arguments
+        self.body = body  # function body
+    def __call__(self, dyn, args, parent):
+        # dyn is dynamic environment (at time of call)
+        # args is call arguments
+        # parent is parent continuation
+        call_env = Environment({self.envname: dyn, self.name: args}, self.env)
+        continuation = Continuation(call_env, self.body[0], parent)
+        return continuation, None
+
 def f_eval(env, expr):
     env = Environment(env, None)
     continuation, value = Continuation(env, expr, None), None
@@ -123,14 +140,6 @@ def _f_define(env, expr, name, *, seen=None, parent=None, _sendval=None):
         return Exception, f'unknown match type: {name}'
     return parent, _sendval
 
-def _f_call_vau(dyn, args, parent, *, env, envname, name, body):
-    call_env = Environment({envname: dyn, name: args}, env)
-    continuation = Continuation(call_env, body[0], parent)
-    return continuation, None
-
-def _f_vau(env, envname, name, body):
-    return Combiner(0, partial(_f_call_vau, env=env, envname=envname, name=name, body=body))
-
 def _f_if(env, result, parent):
     if result is True:
         on_true = env.bindings["on_true"]
@@ -146,7 +155,9 @@ def _operative_plus(env, expr, parent):
     return parent, expr[0] + expr[1][0]
 
 def _operative_vau(env, expr, parent):
-    return parent, _f_vau(env, expr[0][0], expr[0][1][0], expr[1])
+    # ($vau (envname name) body)
+    operative = Operative(env=env, envname=expr[0][0], name=expr[0][1][0], body=expr[1])
+    return parent, Combiner(0, operative)
 
 def _operative_eval(env, expr, parent):
     continuation = Continuation(expr[0], expr[1][0], parent)
