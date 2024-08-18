@@ -200,6 +200,9 @@ def _operative_eq(env, expr, parent):
         else expr[0] is expr[1][0]
     )
 
+def _operative_pair(env, expr, parent):
+    return parent, type(expr[0]) is tuple
+
 _DEFAULT_ENV = {
     "+": Combiner(1, _operative_plus),
     "$vau": Combiner(0, _operative_vau),
@@ -213,6 +216,7 @@ _DEFAULT_ENV = {
     "load": Combiner(1, _operative_load),
     "$if": Combiner(0, _operative_if),
     "eq?": Combiner(1, _operative_eq),
+    "pair?": Combiner(1, _operative_pair),
 }
 
 def tokenize(text):

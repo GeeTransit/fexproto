@@ -32,10 +32,11 @@ temp2
                                 (reverse-tail (cdr (car in-out)) (cons (car (car in-out)) (car (cdr in-out))))))))
                 (reverse-tail (car a) ())))))
 ((unwrap reverse) (3 2 1))
+((unwrap pair?) (1 2))
 ''')
 exprs = fx.parse(tokens)
 env = fx._DEFAULT_ENV.copy()
-for expr, expected in zip(exprs, [None, 7, 5, 10, "a", None, "a", None, "a", "c", 1, 0, True, True, True, (4, 6), None, (1, (2, (3, None)))]):
+for expr, expected in zip(exprs, [None, 7, 5, 10, "a", None, "a", None, "a", "c", 1, 0, True, True, True, (4, 6), None, (1, (2, (3, None))), True]):
     actual = fx.f_eval(env, expr)
     if expected is ...:
         continue
