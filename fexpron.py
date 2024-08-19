@@ -41,7 +41,8 @@ class Operative:
         return continuation, None
 
 def f_eval(env, expr):
-    env = Environment(env, None)
+    if type(env) is dict:
+        env = Environment(env, None)
     continuation, value = Continuation(env, expr, None), None
     while True:
         continuation, value = step_evaluate(continuation, value)
@@ -276,7 +277,8 @@ def main(env=None):
         exit(e)
     if env is None:
         env = _DEFAULT_ENV.copy()
-    env = Environment(env, None)
+    if type(env) is dict:
+        env = Environment(env, None)
     for expr in exprs:
         continuation, value = Continuation(env, expr, None), None
         while True:
