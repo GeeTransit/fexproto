@@ -119,27 +119,8 @@ def _f_load(env, expr, *, parent=None):
 
 # modify environment according to name
 def _f_define(env, expr, name, *, seen=None, parent=None, _sendval=None):
-    if seen is None:
-        seen = set()
-    if type(name) is str:
-        if name in seen:
-            return Exception, f'match contains duplicate name: {name}'
-        env.bindings[name] = expr
-        seen.add(name)
-    elif name is ...:
-        pass
-    elif name is None:
-        if expr is not None:
-            return Exception, f'expected nil match, got: {expr}'
-    elif type(name) is tuple:
-        if type(expr) is not tuple:
-            return Exception, f'expected cons match on {name}, got: {expr}'
-        continuation = Continuation(env, partial(_f_define, name=name[1], seen=seen, _sendval=_sendval), parent)
-        continuation = Continuation(env, partial(_f_define, name=name[0], seen=seen, _sendval=expr[1]), continuation)
-        return continuation, expr[0]
-    else:
-        return Exception, f'unknown match type: {name}'
-    return parent, _sendval
+    env.bindings[name] = expr
+    return parent, None
 
 def _f_if(env, result, parent):
     if result is True:
@@ -284,6 +265,35 @@ def parse(tokens):
         raise ValueError(f'unclosed expression: {expr_stack}')
     return exprs
 
+# make a standard environment (should be constant)
+def _make_standard_environment(*, primitives=None):
+    if primitives is None:
+        primitives = _DEFAULT_ENV
+
+    # create standard environment with primitives as parent
+    env = Environment(primitives, None)
+    env = Environment({}, env)
+
+    # get standard library
+    with open("std.lisp") as file:
+        text = file.read()
+    tokens = tokenize(text)
+    exprs = parse(tokens)
+
+    # evaluate in standard environment
+    for expr in exprs:
+        continuation, value = Continuation(env, expr, None), None
+        while True:
+            continuation, value = step_evaluate(continuation, value)
+            if continuation is Exception:
+                raise ValueError(value)
+            if continuation is None:
+                break
+
+    # return child of standard environment
+    env = Environment({}, env)
+    return env
+
 def main(env=None):
     import pprint
     import sys
@@ -295,7 +305,7 @@ def main(env=None):
     except ValueError as e:
         exit(e)
     if env is None:
-        env = _DEFAULT_ENV.copy()
+        env = _make_standard_environment()
     if type(env) is dict:
         env = Environment(env, None)
     for expr in exprs:
