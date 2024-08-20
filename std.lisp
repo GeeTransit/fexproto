@@ -42,3 +42,12 @@
 				$aux-define!
 				(car name-expr)
 				(eval env (car (cdr name-expr))))))))))
+($define! $vau
+	(($vau (_1 _2) ($sequence
+		($define! $basic-vau $vau)
+		($vau (static name-body)
+			($basic-vau (dyn val)
+				($sequence
+					($define! env (make-environment static))
+					(eval env (list $define! (car name-body) (list (unwrap list) dyn val)))
+					(eval env (cons $sequence (cdr name-body))))))))))

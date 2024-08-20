@@ -2,7 +2,7 @@ import fexpron as fx
 tokens = fx.tokenize(r'''
 (+ (+ 1 1) (+ 2 3))
 (+ 1 4)
-(($vau (e a) (+ (eval e (car a)) (eval e (car (cdr a))))) (+ 1 3) (+ 2 4))
+(($vau (e (a b)) (+ (eval e a) (eval e b))) (+ 1 3) (+ 2 4))
 ((wrap (unwrap car)) (($vau (e a) a) a b c))
 ($define! std ($vau (_ name)
     (eval (make-standard-environment) (car name))))
@@ -18,15 +18,15 @@ temp2
 (cons 4 6)
 ($define! reverse
     (wrap
-        ($vau (e a)
-            ((wrap ($vau (e a-b) (car (cdr a-b))))
+        ($vau (e (a))
+            ((wrap ($vau (e (a b)) b))
                 ($define! reverse-tail
                     (wrap
-                        ($vau (e in-out)
-                            ($if (eq? (car in-out) ())
-                                (car (cdr in-out))
-                                (reverse-tail (cdr (car in-out)) (cons (car (car in-out)) (car (cdr in-out))))))))
-                (reverse-tail (car a) ())))))
+                        ($vau (e (in out))
+                            ($if (eq? in ())
+                                out
+                                (reverse-tail (cdr in) (cons (car in) out))))))
+                (reverse-tail a ())))))
 ((unwrap reverse) (3 2 1))
 ((unwrap pair?) (1 2))
 ''')
