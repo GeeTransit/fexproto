@@ -118,7 +118,9 @@ def _f_load(env, expr, *, parent=None):
     return continuation, args
 
 # modify environment according to name
-def _f_define(env, expr, name, *, seen=None, parent=None, _sendval=None):
+def _f_define(static, expr, parent):
+    env = static.bindings["env"]
+    name = static.bindings["name"]
     env.bindings[name] = expr
     return parent, None
 
@@ -152,7 +154,8 @@ def _operative_unwrap(env, expr, parent):
     return parent, Combiner(expr[0].num_wraps - 1, expr[0].func)
 
 def _operative_define(env, expr, parent):
-    continuation = Continuation(env, partial(_f_define, name=expr[0]), parent)
+    next_env = Environment({"env": env, "name": expr[0]}, None)
+    continuation = Continuation(next_env, _f_define, parent)
     continuation = Continuation(env, expr[1][0], continuation)
     return continuation, None
 
