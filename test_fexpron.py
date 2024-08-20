@@ -4,7 +4,7 @@ tokens = fx.tokenize(r'''
 (+ 1 4)
 (($vau (e (a b)) (+ (eval e a) (eval e b))) (+ 1 3) (+ 2 4))
 ((wrap (unwrap car)) (($vau (e a) a) a b c))
-($define! std ($vau (_ name)
+($define! std ($vau (#ignore name)
     (eval (make-standard-environment) (car name))))
 ((std $car) (a b c))
 ($define! (temp1 (#ignore temp2)) ($car ((a (b c)))))
@@ -17,16 +17,13 @@ temp2
 (eq? "hi" "hi")
 (cons 4 6)
 ($define! reverse
-    (wrap
-        ($vau (e (a))
-            ((wrap ($vau (e (a b)) b))
+        ($lambda (a)
                 ($define! reverse-tail
-                    (wrap
-                        ($vau (e (in out))
+                        ($lambda (in out)
                             ($if (eq? in ())
                                 out
-                                (reverse-tail (cdr in) (cons (car in) out))))))
-                (reverse-tail a ())))))
+                                (reverse-tail (cdr in) (cons (car in) out)))))
+                (reverse-tail a ())))
 ((unwrap reverse) (3 2 1))
 ((unwrap pair?) (1 2))
 ''')
