@@ -37,7 +37,7 @@ class Operative:
         # args is call arguments
         # parent is parent continuation
         call_env = Environment({self.envname: dyn, self.name: args}, self.env)
-        continuation = Continuation(call_env, self.body[0], parent)
+        continuation = Continuation(call_env, self.body, parent)
         return continuation, None
 
 def f_eval(env, expr):
@@ -138,7 +138,7 @@ def _operative_plus(env, expr, parent):
 
 def _operative_vau(env, expr, parent):
     # ($vau (envname name) body)
-    operative = Operative(env=env, envname=expr[0][0], name=expr[0][1][0], body=expr[1])
+    operative = Operative(env=env, envname=expr[0][0], name=expr[0][1][0], body=expr[1][0])
     return parent, Combiner(0, operative)
 
 def _operative_eval(env, expr, parent):
