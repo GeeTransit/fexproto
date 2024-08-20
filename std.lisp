@@ -1,3 +1,5 @@
 ($define! $car (unwrap car))
 ($define! $cdr (unwrap cdr))
 ($define! $cons (unwrap cons))
+($define! get-current-environment (wrap ($vau (env _) env)))
+($define! list (wrap ($vau (_ args) args)))
