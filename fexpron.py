@@ -204,6 +204,24 @@ def _operative_eq(env, expr, parent):
 def _operative_pair(env, expr, parent):
     return parent, type(expr[0]) is tuple
 
+def _operative_make_environment(_env, expr, parent):
+    envs = []
+    while expr is not None: envs.append(expr[0]); expr = expr[1]
+    result = None
+    if envs:
+        result = envs.pop()
+    for env in reversed(envs):
+        parent_envs = []
+        while True:
+            parent_envs.append(env)
+            env = env.parent
+            if env is None:
+                break
+        for parent_env in reversed(parent_envs):
+            result = Environment(parent_env.bindings, result)
+    result = Environment({}, result)
+    return parent, result
+
 _DEFAULT_ENV = {
     "+": Combiner(1, _operative_plus),
     "$vau": Combiner(0, _operative_vau),
@@ -218,6 +236,7 @@ _DEFAULT_ENV = {
     "$if": Combiner(0, _operative_if),
     "eq?": Combiner(1, _operative_eq),
     "pair?": Combiner(1, _operative_pair),
+    "make-environment": Combiner(1, _operative_make_environment),
 }
 
 def tokenize(text):
