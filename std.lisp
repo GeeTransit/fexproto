@@ -51,3 +51,11 @@
 					($define! env (make-environment static))
 					(eval env (list $define! (car name-body) (list (unwrap list) dyn val)))
 					(eval env (cons $sequence (cdr name-body))))))))))
+($define! $lambda
+	($vau (static name-body)
+		(wrap (eval static
+			(cons
+				$vau
+			(cons
+				(list #ignore (car name-body))
+				(cdr name-body)))))))
