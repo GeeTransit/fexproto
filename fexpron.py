@@ -14,6 +14,7 @@ class Environment:
         self.bindings = bindings
         assert parent is None or type(parent) is Environment, f'parent must be None or type Environment, got: {type(parent)}'
         self.parent = parent
+Environment.ROOT = Environment({}, None)
 
 class Continuation:
     def __init__(self, env, expr, parent):
@@ -22,6 +23,7 @@ class Continuation:
         self.expr = expr
         assert parent is None or type(parent) is Continuation, f'parent must be None or type Continuation, got: {type(parent)}'
         self.parent = parent
+Continuation.ROOT = Continuation(Environment.ROOT, None, None)
 
 class Operative:
     def __init__(self, env, envname, name, body):
@@ -42,13 +44,13 @@ class Operative:
 
 def f_eval(env, expr):
     if type(env) is dict:
-        env = Environment(env, None)
-    continuation, value = Continuation(env, expr, None), None
+        env = Environment(env, Environment.ROOT)
+    continuation, value = Continuation(env, expr, Continuation.ROOT), None
     while True:
         continuation, value = step_evaluate(continuation, value)
         if continuation is Exception:
             raise ValueError(value)
-        if continuation is None:
+        if continuation is Continuation.ROOT:
             return value
 
 # given a continuation and a value, get the next continuation and value
@@ -154,7 +156,7 @@ def _operative_unwrap(env, expr, parent):
     return parent, Combiner(expr[0].num_wraps - 1, expr[0].func)
 
 def _operative_define(env, expr, parent):
-    next_env = Environment({"env": env, "name": expr[0]}, None)
+    next_env = Environment({"env": env, "name": expr[0]}, Environment.ROOT)
     continuation = Continuation(next_env, _f_define, parent)
     continuation = Continuation(env, expr[1][0], continuation)
     return continuation, None
@@ -173,7 +175,7 @@ def _operative_load(env, expr, parent):
     return continuation, expr[0]
 
 def _operative_if(env, expr, parent):
-    next_env = Environment({"env": env, "on_true": expr[1][0], "on_false": expr[1][1][0]}, None)
+    next_env = Environment({"env": env, "on_true": expr[1][0], "on_false": expr[1][1][0]}, Environment.ROOT)
     continuation = Continuation(next_env, _f_if, parent)
     continuation = Continuation(env, expr[0], continuation)
     return continuation, None
@@ -191,7 +193,7 @@ def _operative_pair(env, expr, parent):
 def _operative_make_environment(_env, expr, parent):
     envs = []
     while expr is not None: envs.append(expr[0]); expr = expr[1]
-    result = None
+    result = Environment.ROOT
     if envs:
         result = envs.pop()
     for env in reversed(envs):
@@ -199,7 +201,7 @@ def _operative_make_environment(_env, expr, parent):
         while True:
             parent_envs.append(env)
             env = env.parent
-            if env is None:
+            if env is Environment.ROOT:
                 break
         for parent_env in reversed(parent_envs):
             result = Environment(parent_env.bindings, result)
@@ -274,7 +276,7 @@ def _make_standard_environment(*, primitives=None):
         primitives = _DEFAULT_ENV
 
     # create standard environment with primitives as parent
-    env = Environment(primitives, None)
+    env = Environment(primitives, Environment.ROOT)
     env = Environment({}, env)
 
     # get standard library
@@ -285,12 +287,12 @@ def _make_standard_environment(*, primitives=None):
 
     # evaluate in standard environment
     for expr in exprs:
-        continuation, value = Continuation(env, expr, None), None
+        continuation, value = Continuation(env, expr, Continuation.ROOT), None
         while True:
             continuation, value = step_evaluate(continuation, value)
             if continuation is Exception:
                 raise ValueError(value)
-            if continuation is None:
+            if continuation is Continuation.ROOT:
                 break
 
     # return child of standard environment
@@ -310,14 +312,14 @@ def main(env=None):
     if env is None:
         env = _make_standard_environment()
     if type(env) is dict:
-        env = Environment(env, None)
+        env = Environment(env, Environment.ROOT)
     for expr in exprs:
-        continuation, value = Continuation(env, expr, None), None
+        continuation, value = Continuation(env, expr, Continuation.ROOT), None
         while True:
             continuation, value = step_evaluate(continuation, value)
             if continuation is Exception:
                 exit(value)
-            if continuation is None:
+            if continuation is Continuation.ROOT:
                 break
         pprint.pp(value)
 
