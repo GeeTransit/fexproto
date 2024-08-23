@@ -70,7 +70,7 @@ def step_evaluate(continuation, value):
         continuation = Continuation(env, partial(_step_call_wrapped, args=args), parent)
         continuation = Continuation(env, name, continuation)
         return continuation, None
-    elif type(expr) in (int, float, Combiner, bytes, type(...), bool, type(None)):
+    elif type(expr) in (int, float, Combiner, bytes, type(...), bool, type(None), Continuation, Environment):
         return parent, expr
     elif callable(expr):
         return expr(env, value, parent=parent)
