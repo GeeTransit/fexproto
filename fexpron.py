@@ -12,18 +12,18 @@ class Environment:
     def __init__(self, bindings, parent):
         assert type(bindings) is dict, f'bindings must be dict, got: {type(bindings)}'
         self.bindings = bindings
-        assert parent is None or type(parent) is Environment, f'parent must be None or type Environment, got: {type(parent)}'
+        assert type(parent) is Environment, f'parent must type Environment, got: {type(parent)}'
         self.parent = parent
-Environment.ROOT = Environment({}, None)
+Environment.ROOT = object.__new__(Environment)
 
 class Continuation:
     def __init__(self, env, expr, parent):
         assert type(env) is Environment, f'env must be type Environment, got: {type(env)}'
         self.env = env
         self.expr = expr
-        assert parent is None or type(parent) is Continuation, f'parent must be None or type Continuation, got: {type(parent)}'
+        assert type(parent) is Continuation, f'parent must be type Continuation, got: {type(parent)}'
         self.parent = parent
-Continuation.ROOT = Continuation(Environment.ROOT, None, None)
+Continuation.ROOT = object.__new__(Continuation)
 
 class Operative:
     def __init__(self, env, envname, name, body):
@@ -59,10 +59,12 @@ def step_evaluate(continuation, value):
     expr = continuation.expr
     parent = continuation.parent
     if type(expr) is str:
-        while env is not None:
+        while True:
             if expr in env.bindings:
                 return parent, env.bindings[expr]
             env = env.parent
+            if env is Environment.ROOT:
+                break
         return Exception, f'binding not found: {expr}'
     elif type(expr) is tuple:
         name, args = expr
