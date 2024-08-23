@@ -137,6 +137,9 @@ def _f_if(env, result, parent):
         return Continuation(env, on_false, parent), None
     return Exception, f'expected #t or #f as condition for $if, got: {result}'
 
+def _f_abnormal_pass(env, _value, parent):
+    return env.parent.bindings["continuation"], env.bindings["value"]
+
 def _operative_plus(env, expr, parent):
     return parent, expr[0] + expr[1][0]
 
@@ -208,6 +211,18 @@ def _operative_make_environment(_env, expr, parent):
     result = Environment({}, result)
     return parent, result
 
+def _operative_continuation_to_applicative(_env, expr, parent):
+    continuation = expr[0]
+    if type(continuation) is not Continuation:
+        return Exception, f'continuation must be type Continuation, got: {type(continuation)}'
+    env = Environment({"continuation": continuation}, Environment.ROOT)
+    operative = Operative(env, "_", "value", _f_abnormal_pass)
+    return parent, Combiner(1, operative)
+
+def _operative_call_cc(env, expr, parent):
+    continuation = Continuation(env, (expr[0], (parent, None)), parent)
+    return continuation, None
+
 _DEFAULT_ENV = {
     "+": Combiner(1, _operative_plus),
     "$vau": Combiner(0, _operative_vau),
@@ -223,6 +238,8 @@ _DEFAULT_ENV = {
     "eq?": Combiner(1, _operative_eq),
     "pair?": Combiner(1, _operative_pair),
     "make-environment": Combiner(1, _operative_make_environment),
+    "continuation->applicative": Combiner(1, _operative_continuation_to_applicative),
+    "call/cc": Combiner(1, _operative_call_cc),
 }
 
 def tokenize(text):
