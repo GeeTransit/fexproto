@@ -15,7 +15,7 @@
 							(eval env (cons $aux-sequence (cdr exprs)))))))
 				($vau (env exprs)
 					($if (eq? exprs ())
-						()
+						#inert
 						(eval env (cons $aux-sequence exprs)))))))
 		((wrap ($vau (_ $basic-vau)
 				((car $basic-vau) (env a-b)
@@ -29,9 +29,9 @@
 			($basic-define! name (car name-val))
 			($basic-define! val (car (cdr name-val)))
 			($if (eq? name #ignore)
-				()
+				#inert
 				($if (eq? name ())
-					()
+					#inert
 					($if (pair? name)
 						($sequence
 							(eval env (list $aux-define! (car name) (car val)))

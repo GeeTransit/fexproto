@@ -67,6 +67,8 @@ def step_evaluate(continuation, value):
                 break
         return Exception, f'binding not found: {expr}'
     elif type(expr) is tuple:
+        if expr == ():
+            return parent, expr
         name, args = expr
         # evaluate car of call
         continuation = Continuation(env, partial(_step_call_wrapped, args=args), parent)
@@ -80,7 +82,7 @@ def step_evaluate(continuation, value):
         return Exception, f'unknown expression type: {expr}'
 
 # evaluate arguments based on num_wraps
-def _step_call_wrapped(env, combiner, parent, args=None):
+def _step_call_wrapped(env, combiner, parent, args=()):
     continuation = Continuation(env, combiner.func, parent)
     continuation = Continuation(env, partial(_step_call_evlis, num_wraps=combiner.num_wraps), continuation)
     return continuation, args
@@ -94,16 +96,16 @@ def _step_call_evlis(env, args, parent, num_wraps=1):
     else:
         return parent, args
 
-def _step_call_evcar(env, value, parent, pending=None, done=None):
+def _step_call_evcar(env, value, parent, pending=(), done=()):
     done = (value, done)
-    if pending is not None:
+    if pending != ():
         # append the previous result and evaluate the next element
         continuation = Continuation(env, partial(_step_call_evcar, pending=pending[1], done=done), parent)
         continuation = Continuation(env, pending[0], continuation)
         return continuation, None
     else:
-        args = None
-        while done is not None: args, done = (done[0], args), done[1]
+        args = ()
+        while done != (): args, done = (done[0], args), done[1]
         return parent, args[1]
 
 # load a file in an environment
@@ -115,7 +117,7 @@ def _f_load(env, expr, *, parent=None):
         exprs = parse(tokens)
     except ValueError as e:
         return Exception, repr(e)
-    args = None
+    args = ()
     for expr in reversed(exprs): args = expr, args
     continuation = Continuation(env, None, parent)
     continuation = Continuation(env, _step_call_evlis, continuation)
@@ -193,11 +195,11 @@ def _operative_eq(env, expr, parent):
     )
 
 def _operative_pair(env, expr, parent):
-    return parent, type(expr[0]) is tuple
+    return parent, type(expr[0]) is tuple and expr[0] != ()
 
 def _operative_make_environment(_env, expr, parent):
     envs = []
-    while expr is not None: envs.append(expr[0]); expr = expr[1]
+    while expr != (): envs.append(expr[0]); expr = expr[1]
     result = Environment.ROOT
     if envs:
         result = envs.pop()
@@ -222,7 +224,7 @@ def _operative_continuation_to_applicative(_env, expr, parent):
     return parent, Combiner(1, operative)
 
 def _operative_call_cc(env, expr, parent):
-    continuation = Continuation(env, (expr[0], (parent, None)), parent)
+    continuation = Continuation(env, (expr[0], (parent, ())), parent)
     return continuation, None
 
 _DEFAULT_ENV = {
@@ -252,13 +254,13 @@ def parse(tokens):
     expr_stack = []
     for token in tokens:
         if token == "(":
-            expr_stack.append(None)
+            expr_stack.append(())
         elif token == ")":
             if not expr_stack:
                 raise ValueError("unmatched close bracket")
             rev_expr = expr_stack.pop()
-            expr = None
-            while rev_expr is not None:
+            expr = ()
+            while rev_expr != ():
                 expr, rev_expr = (rev_expr[0], expr), rev_expr[1]
             if expr_stack:
                 expr_stack[-1] = (expr, expr_stack[-1])
@@ -269,6 +271,8 @@ def parse(tokens):
                 token = token[1:-1].encode("raw_unicode_escape").decode("unicode_escape").encode("utf-8")
             elif token == "#ignore":
                 token = ...
+            elif token == "#inert":
+                token = None
             elif token in ("#t", "#f"):
                 token = token == "#t"
             else:
