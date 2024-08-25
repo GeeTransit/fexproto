@@ -46,12 +46,11 @@ def f_eval(env, expr):
     if type(env) is dict:
         env = Environment(env, Environment.ROOT)
     continuation, value = Continuation(env, expr, Continuation.ROOT), None
-    while True:
+    while continuation is not Continuation.ROOT:
         continuation, value = step_evaluate(continuation, value)
         if continuation is Exception:
             raise ValueError(value)
-        if continuation is Continuation.ROOT:
-            return value
+    return value
 
 # given a continuation and a value, get the next continuation and value
 def step_evaluate(continuation, value):
@@ -59,12 +58,10 @@ def step_evaluate(continuation, value):
     expr = continuation.expr
     parent = continuation.parent
     if type(expr) is str:
-        while True:
+        while env is not Environment.ROOT:
             if expr in env.bindings:
                 return parent, env.bindings[expr]
             env = env.parent
-            if env is Environment.ROOT:
-                break
         return Exception, f'binding not found: {expr}'
     elif type(expr) is tuple:
         if expr == ():
@@ -297,12 +294,10 @@ def _make_standard_environment(*, primitives=None):
     # evaluate in standard environment
     for expr in exprs:
         continuation, value = Continuation(env, expr, Continuation.ROOT), None
-        while True:
+        while continuation is not Continuation.ROOT:
             continuation, value = step_evaluate(continuation, value)
             if continuation is Exception:
                 raise ValueError(value)
-            if continuation is Continuation.ROOT:
-                break
 
     # return child of standard environment
     env = Environment({}, env)
@@ -324,12 +319,10 @@ def main(env=None):
         env = Environment(env, Environment.ROOT)
     for expr in exprs:
         continuation, value = Continuation(env, expr, Continuation.ROOT), None
-        while True:
+        while continuation is not Continuation.ROOT:
             continuation, value = step_evaluate(continuation, value)
             if continuation is Exception:
                 exit(value)
-            if continuation is Continuation.ROOT:
-                break
         pprint.pp(value)
 
 if __name__ == "__main__":
