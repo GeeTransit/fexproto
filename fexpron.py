@@ -198,22 +198,8 @@ def _operative_pair(env, expr, parent):
     return parent, type(expr[0]) is tuple and expr[0] != ()
 
 def _operative_make_environment(_env, expr, parent):
-    envs = []
-    while expr != (): envs.append(expr[0]); expr = expr[1]
-    result = Environment.ROOT
-    if envs:
-        result = envs.pop()
-    for env in reversed(envs):
-        parent_envs = []
-        while True:
-            parent_envs.append(env)
-            env = env.parent
-            if env is Environment.ROOT:
-                break
-        for parent_env in reversed(parent_envs):
-            result = Environment(parent_env.bindings, result)
-    result = Environment({}, result)
-    return parent, result
+    parent_env = expr[0] if expr != () else Environment.ROOT
+    return parent, Environment({}, parent_env)
 
 def _operative_continuation_to_applicative(_env, expr, parent):
     continuation = expr[0]
