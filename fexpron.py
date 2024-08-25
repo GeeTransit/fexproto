@@ -48,9 +48,18 @@ def f_eval(env, expr):
     continuation, value = Continuation(env, expr, Continuation.ROOT), None
     while continuation is not Continuation.ROOT:
         continuation, value = step_evaluate(continuation, value)
-        if continuation is Exception:
+        if continuation is Continuation.ERROR:
             raise ValueError(value)
     return value
+
+def _f_error(parent, *args):
+    error_applicative = (Combiner(1, _operative_continuation_to_applicative), (Continuation.ERROR, ()))
+    error_operative = (Combiner(1, _operative_unwrap), (error_applicative, ()))
+    message_tree = ()
+    for arg in reversed(args): message_tree = (arg, message_tree)
+    expr = (error_operative, message_tree)
+    continuation = Continuation(Environment.ROOT, expr, parent)
+    return continuation, None
 
 # given a continuation and a value, get the next continuation and value
 def step_evaluate(continuation, value):
@@ -62,7 +71,7 @@ def step_evaluate(continuation, value):
             if expr in env.bindings:
                 return parent, env.bindings[expr]
             env = env.parent
-        return Exception, f'binding not found: {expr}'
+        return _f_error(parent, b"binding not found: ", expr)
     elif type(expr) is tuple:
         if expr == ():
             return parent, expr
@@ -76,7 +85,7 @@ def step_evaluate(continuation, value):
     elif callable(expr):
         return expr(env, value, parent=parent)
     else:
-        return Exception, f'unknown expression type: {expr}'
+        return _f_error(parent, b"unknown expression type: ", expr)
 
 # evaluate arguments based on num_wraps
 def _step_call_wrapped(env, combiner, parent, args=()):
@@ -113,7 +122,7 @@ def _f_load(env, expr, *, parent=None):
     try:
         exprs = parse(tokens)
     except ValueError as e:
-        return Exception, repr(e)
+        return _f_error(parent, repr(e).encode("utf-8"))
     args = ()
     for expr in reversed(exprs): args = expr, args
     continuation = Continuation(env, None, parent)
@@ -136,7 +145,7 @@ def _f_if(env, result, parent):
         on_false = env.bindings["on_false"]
         env = env.bindings["env"]
         return Continuation(env, on_false, parent), None
-    return Exception, f'expected #t or #f as condition for $if, got: {result}'
+    return _f_error(parent, b"expected #t or #f as condition for $if, got: ", result)
 
 def _f_abnormal_pass(env, _value, parent):
     return env.parent.bindings["continuation"], env.bindings["value"]
@@ -201,7 +210,7 @@ def _operative_make_environment(_env, expr, parent):
 def _operative_continuation_to_applicative(_env, expr, parent):
     continuation = expr[0]
     if type(continuation) is not Continuation:
-        return Exception, f'continuation must be type Continuation, got: {type(continuation)}'
+        return _f_error(parent, b"continuation must be type Continuation, got: ", continuation)
     env = Environment({"continuation": continuation}, Environment.ROOT)
     operative = Operative(env, "_", "value", _f_abnormal_pass)
     return parent, Combiner(1, operative)
@@ -296,7 +305,7 @@ def _make_standard_environment(*, primitives=None):
         continuation, value = Continuation(env, expr, Continuation.ROOT), None
         while continuation is not Continuation.ROOT:
             continuation, value = step_evaluate(continuation, value)
-            if continuation is Exception:
+            if continuation is Continuation.ERROR:
                 raise ValueError(value)
 
     # return child of standard environment
@@ -321,7 +330,7 @@ def main(env=None):
         continuation, value = Continuation(env, expr, Continuation.ROOT), None
         while continuation is not Continuation.ROOT:
             continuation, value = step_evaluate(continuation, value)
-            if continuation is Exception:
+            if continuation is Continuation.ERROR:
                 exit(value)
         pprint.pp(value)
 
