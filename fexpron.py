@@ -24,6 +24,7 @@ class Continuation:
         assert type(parent) is Continuation, f'parent must be type Continuation, got: {type(parent)}'
         self.parent = parent
 Continuation.ROOT = object.__new__(Continuation)
+Continuation.ERROR = Continuation(Environment.ROOT, None, Continuation.ROOT)
 
 class Operative:
     def __init__(self, env, envname, name, body):
@@ -236,6 +237,7 @@ _DEFAULT_ENV = {
     "make-environment": Combiner(1, _operative_make_environment),
     "continuation->applicative": Combiner(1, _operative_continuation_to_applicative),
     "call/cc": Combiner(1, _operative_call_cc),
+    "error-continuation": Continuation.ERROR,
 }
 
 def tokenize(text):

@@ -31,11 +31,15 @@
 			($if (eq? name #ignore)
 				#inert
 				($if (eq? name ())
-					#inert
+					($if (eq? val ())
+						#inert
+						((continuation->applicative error-continuation) "expected\x20nil\x20match,\x20got:\x20" val))
 					($if (pair? name)
-						($sequence
-							(eval env (list $aux-define! (car name) (car val)))
-							(eval env (list $aux-define! (cdr name) (cdr val))))
+						($if (pair? val)
+							($sequence
+								(eval env (list $aux-define! (car name) (car val)))
+								(eval env (list $aux-define! (cdr name) (cdr val))))
+							((continuation->applicative error-continuation) "expected\x20cons\x20match\x20on\x20" name ",\x20got\x20" val))
 						(eval env (list $basic-define! name (cons (unwrap list) val)))))))))
 		($vau (env name-expr)
 			(eval env (list
