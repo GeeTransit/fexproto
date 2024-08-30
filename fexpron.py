@@ -1,5 +1,3 @@
-from functools import partial
-
 # wraps a function with zero, one, or more layers of argument evaluation
 class Combiner:
     def __init__(self, num_wraps, func):
@@ -78,7 +76,8 @@ def step_evaluate(continuation, value):
             return parent, expr
         name, args = expr
         # evaluate car of call
-        continuation = Continuation(env, partial(_step_call_wrapped, args=args), parent)
+        next_env = Environment({"env": env, "args": args}, Environment.ROOT)
+        continuation = Continuation(next_env, _step_call_wrapped, parent)
         continuation = Continuation(env, name, continuation)
         return continuation, None
     elif type(expr) in (int, float, Combiner, bytes, type(...), bool, type(None), Continuation, Environment):
@@ -88,32 +87,103 @@ def step_evaluate(continuation, value):
     else:
         return _f_error(parent, b"unknown expression type: ", expr)
 
+# return (number of Pairs, number of Nils, Acyclic prefix length, Cycle length)
+def _get_list_metrics(obj):
+    if type(obj) is not tuple or obj == ():
+        return 0, (1 if obj == () else 0), 0, 0
+    hare_distance = hare_power = 1
+    list_length = 0
+    tortoise = obj
+    hare = obj[1]
+    if type(hare) is not tuple or hare == ():
+        return list_length + hare_distance, (1 if hare == () else 0), list_length + hare_distance, 0
+    # Brent's cycle detection algorithm
+    while tortoise is not hare:
+        if hare_distance == hare_power:
+            tortoise = hare
+            hare_power *= 2
+            list_length += hare_distance
+            hare_distance = 0
+        hare = hare[1]
+        hare_distance += 1
+        if type(hare) is not tuple or hare == ():
+            return list_length + hare_distance, (1 if hare == () else 0), list_length + hare_distance, 0
+    tortoise = hare = obj
+    for _ in range(hare_distance):
+        hare = hare[1]
+    offset = 0
+    while tortoise is not hare:
+        tortoise = tortoise[1]
+        hare = hare[1]
+        offset += 1
+    return offset + hare_distance, 0, offset, hare_distance
+
+# if c is nonzero, set the a+c-1th pair's cdr to the ath pair
+def _step_encycle(env, args, parent):
+    a = env.bindings["a"]
+    c = env.bindings["c"]
+    if c == 0:
+        return parent, args
+    for _ in range(a):
+        args = args[1]
+    head = args
+    for _ in range(c - 1):
+        args = args[1]
+    args[1] = head
+    return parent, args
+
 # evaluate arguments based on num_wraps
-def _step_call_wrapped(env, combiner, parent, args=()):
+def _step_call_wrapped(static, combiner, parent):
+    env = static.bindings["env"]
+    args = static.bindings["args"]
     continuation = Continuation(env, combiner.func, parent)
-    continuation = Continuation(env, partial(_step_call_evlis, num_wraps=combiner.num_wraps), continuation)
+    if combiner.num_wraps == 0:
+        return continuation, args
+    p, n, a, c = _get_list_metrics(args)
+    if n == c == 0:
+        return _f_error(parent, b"applicative arguments must be proper list, got: ", args)
+    encycle_env = Environment({"a": a, "c": c}, Environment.ROOT)
+    continuation = Continuation(encycle_env, _step_encycle, continuation)
+    next_env = Environment({"env": env, "num_wraps": combiner.num_wraps, "p": p}, Environment.ROOT)
+    continuation = Continuation(next_env, _step_call_evlis, continuation)
     return continuation, args
 
 # evaluate each element in the list
-def _step_call_evlis(env, args, parent, num_wraps=1):
+def _step_call_evlis(static, args, parent):
+    num_wraps = static.bindings["num_wraps"]
+    env = static.bindings["env"]
+    p = static.bindings["p"]
     if num_wraps > 0:
-        continuation = Continuation(env, partial(_step_call_evlis, num_wraps=num_wraps - 1), parent)
-        continuation = Continuation(env, partial(_step_call_evcar, pending=args), continuation)
+        next_env = Environment({"env": env, "num_wraps": num_wraps - 1, "p": p}, Environment.ROOT)
+        continuation = Continuation(next_env, _step_call_evlis, parent)
+        evcar_env = Environment({"env": env, "p": p, "pending": args, "done": (), "started": False}, Environment.ROOT)
+        continuation = Continuation(evcar_env, _step_call_evcar, continuation)
         return continuation, None
     else:
         return parent, args
 
-def _step_call_evcar(env, value, parent, pending=(), done=()):
-    done = (value, done)
-    if pending != ():
+def _step_call_evcar(static, value, parent):
+    env = static.bindings["env"]
+    p = static.bindings["p"]
+    pending = static.bindings["pending"]
+    done = static.bindings["done"]
+    started = static.bindings["started"]
+    if started:
+        done = (value, done)
+    else:
+        static.bindings["started"] = True
+    if p > 0:
         # append the previous result and evaluate the next element
-        continuation = Continuation(env, partial(_step_call_evcar, pending=pending[1], done=done), parent)
+        static.bindings["p"] -= 1
+        static.bindings["pending"] = pending[1]
+        static.bindings["done"] = done
+        continuation = Continuation(static, _step_call_evcar, parent)
         continuation = Continuation(env, pending[0], continuation)
         return continuation, None
     else:
         args = ()
         while done != (): args, done = (done[0], args), done[1]
-        return parent, args[1]
+        return parent, args
 
 # load a file in an environment
 def _f_load(env, expr, *, parent=None):
@@ -127,7 +197,8 @@ def _f_load(env, expr, *, parent=None):
     args = ()
     for expr in reversed(exprs): args = expr, args
     continuation = Continuation(env, None, parent)
-    continuation = Continuation(env, _step_call_evlis, continuation)
+    next_env = Environment({"env": env, "num_wraps": 1, "p": len(exprs)}, Environment.ROOT)
+    continuation = Continuation(next_env, _step_call_evlis, continuation)
     return continuation, args
 
 # modify environment according to name
