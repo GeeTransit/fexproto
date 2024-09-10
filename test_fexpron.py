@@ -30,7 +30,7 @@ temp2
 ''')
 exprs = fx.parse(tokens)
 env = fx._make_standard_environment()
-for expr, expected in zip(exprs, [7, 5, 10, "a", None, "a", None, "a", "c", 1, 0, True, True, True, (4, 6), None, (1, (2, (3, ()))), True, (1, ())]):
+for expr, expected in zip(exprs, [7, 5, 10, "a", None, "a", None, "a", "c", 1, 0, True, True, True, fx.Pair(4, 6), None, fx.Pair(1, fx.Pair(2, fx.Pair(3, ()))), True, fx.Pair(1, ())]):
     actual = fx.f_eval(env, expr)
     if expected is ...:
         continue

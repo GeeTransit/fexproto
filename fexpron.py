@@ -41,6 +41,18 @@ class Operative:
         continuation = Continuation(call_env, self.body, parent)
         return continuation, None
 
+class Pair:
+    def __init__(self, car, cdr):
+        self.car = car
+        self.cdr = cdr
+        self.immutable = False
+    def __eq__(self, other):
+        return self is other or (
+            type(other) is Pair
+            and self.car == other.car
+            and self.cdr == other.cdr
+        )
+
 def f_eval(env, expr):
     if type(env) is dict:
         env = Environment(env, Environment.ROOT)
@@ -52,11 +64,11 @@ def f_eval(env, expr):
     return value
 
 def _f_error(parent, *args):
-    error_applicative = (Combiner(1, _operative_continuation_to_applicative), (Continuation.ERROR, ()))
-    error_operative = (Combiner(1, _operative_unwrap), (error_applicative, ()))
+    error_applicative = Pair(Combiner(1, _operative_continuation_to_applicative), Pair(Continuation.ERROR, ()))
+    error_operative = Pair(Combiner(1, _operative_unwrap), Pair(error_applicative, ()))
     message_tree = ()
-    for arg in reversed(args): message_tree = (arg, message_tree)
-    expr = (error_operative, message_tree)
+    for arg in reversed(args): message_tree = Pair(arg, message_tree)
+    expr = Pair(error_operative, message_tree)
     continuation = Continuation(Environment.ROOT, expr, parent)
     return continuation, None
 
@@ -71,16 +83,14 @@ def step_evaluate(continuation, value):
                 return parent, env.bindings[expr]
             env = env.parent
         return _f_error(parent, b"binding not found: ", expr)
-    elif type(expr) is tuple:
-        if expr == ():
-            return parent, expr
-        name, args = expr
+    elif type(expr) is Pair:
+        name, args = expr.car, expr.cdr
         # evaluate car of call
         next_env = Environment({"env": env, "args": args}, Environment.ROOT)
         continuation = Continuation(next_env, _step_call_wrapped, parent)
         continuation = Continuation(env, name, continuation)
         return continuation, None
-    elif type(expr) in (int, float, Combiner, bytes, type(...), bool, type(None), Continuation, Environment):
+    elif type(expr) in (int, float, Combiner, bytes, type(...), bool, type(None), Continuation, Environment, tuple):
         return parent, expr
     elif callable(expr):
         return expr(env, value, parent=parent)
@@ -89,13 +99,13 @@ def step_evaluate(continuation, value):
 
 # return (number of Pairs, number of Nils, Acyclic prefix length, Cycle length)
 def _get_list_metrics(obj):
-    if type(obj) is not tuple or obj == ():
+    if type(obj) is not Pair:
         return 0, (1 if obj == () else 0), 0, 0
     hare_distance = hare_power = 1
     list_length = 0
     tortoise = obj
-    hare = obj[1]
-    if type(hare) is not tuple or hare == ():
+    hare = obj.cdr
+    if type(hare) is not Pair:
         return list_length + hare_distance, (1 if hare == () else 0), list_length + hare_distance, 0
     # Brent's cycle detection algorithm
     while tortoise is not hare:
@@ -104,17 +114,17 @@ def _get_list_metrics(obj):
             hare_power *= 2
             list_length += hare_distance
             hare_distance = 0
-        hare = hare[1]
+        hare = hare.cdr
         hare_distance += 1
-        if type(hare) is not tuple or hare == ():
+        if type(hare) is not Pair:
             return list_length + hare_distance, (1 if hare == () else 0), list_length + hare_distance, 0
     tortoise = hare = obj
     for _ in range(hare_distance):
-        hare = hare[1]
+        hare = hare.cdr
     offset = 0
     while tortoise is not hare:
-        tortoise = tortoise[1]
-        hare = hare[1]
+        tortoise = tortoise.cdr
+        hare = hare.cdr
         offset += 1
     return offset + hare_distance, 0, offset, hare_distance
 
@@ -125,11 +135,11 @@ def _step_encycle(env, args, parent):
     if c == 0:
         return parent, args
     for _ in range(a):
-        args = args[1]
+        args = args.cdr
     head = args
     for _ in range(c - 1):
-        args = args[1]
-    args[1] = head
+        args = args.cdr
+    args.cdr = head
     return parent, args
 
 # evaluate arguments based on num_wraps
@@ -169,20 +179,20 @@ def _step_call_evcar(static, value, parent):
     done = static.bindings["done"]
     started = static.bindings["started"]
     if started:
-        done = (value, done)
+        done = Pair(value, done)
     else:
         static.bindings["started"] = True
     if p > 0:
         # append the previous result and evaluate the next element
         static.bindings["p"] -= 1
-        static.bindings["pending"] = pending[1]
+        static.bindings["pending"] = pending.cdr
         static.bindings["done"] = done
         continuation = Continuation(static, _step_call_evcar, parent)
-        continuation = Continuation(env, pending[0], continuation)
+        continuation = Continuation(env, pending.car, continuation)
         return continuation, None
     else:
         args = ()
-        while done != (): args, done = (done[0], args), done[1]
+        while done != (): args, done = Pair(done.car, args), done.cdr
         return parent, args
 
 # load a file in an environment
@@ -195,7 +205,7 @@ def _f_load(env, expr, *, parent=None):
     except ValueError as e:
         return _f_error(parent, repr(e).encode("utf-8"))
     args = ()
-    for expr in reversed(exprs): args = expr, args
+    for expr in reversed(exprs): args = Pair(expr, args)
     continuation = Continuation(env, None, parent)
     next_env = Environment({"env": env, "num_wraps": 1, "p": len(exprs)}, Environment.ROOT)
     continuation = Continuation(next_env, _step_call_evlis, continuation)
@@ -223,64 +233,64 @@ def _f_abnormal_pass(env, _value, parent):
     return env.parent.bindings["continuation"], env.bindings["value"]
 
 def _operative_plus(env, expr, parent):
-    return parent, expr[0] + expr[1][0]
+    return parent, expr.car + expr.cdr.car
 
 def _operative_vau(env, expr, parent):
     # ($vau (envname name) body)
-    operative = Operative(env=env, envname=expr[0][0], name=expr[0][1][0], body=expr[1][0])
+    operative = Operative(env=env, envname=expr.car.car, name=expr.car.cdr.car, body=expr.cdr.car)
     return parent, Combiner(0, operative)
 
 def _operative_eval(env, expr, parent):
-    continuation = Continuation(expr[0], expr[1][0], parent)
+    continuation = Continuation(expr.car, expr.cdr.car, parent)
     return continuation, None
 
 def _operative_wrap(env, expr, parent):
-    return parent, Combiner(expr[0].num_wraps + 1, expr[0].func)
+    return parent, Combiner(expr.car.num_wraps + 1, expr.car.func)
 
 def _operative_unwrap(env, expr, parent):
-    return parent, Combiner(expr[0].num_wraps - 1, expr[0].func)
+    return parent, Combiner(expr.car.num_wraps - 1, expr.car.func)
 
 def _operative_define(env, expr, parent):
-    next_env = Environment({"env": env, "name": expr[0]}, Environment.ROOT)
+    next_env = Environment({"env": env, "name": expr.car}, Environment.ROOT)
     continuation = Continuation(next_env, _f_define, parent)
-    continuation = Continuation(env, expr[1][0], continuation)
+    continuation = Continuation(env, expr.cdr.car, continuation)
     return continuation, None
 
 def _operative_car(env, expr, parent):
-    return parent, expr[0][0]
+    return parent, expr.car.car
 
 def _operative_cdr(env, expr, parent):
-    return parent, expr[0][1]
+    return parent, expr.car.cdr
 
 def _operative_cons(env, expr, parent):
-    return parent, (expr[0], expr[1][0])
+    return parent, Pair(expr.car, expr.cdr.car)
 
 def _operative_load(env, expr, parent):
     continuation = Continuation(env, _f_load, parent)
-    return continuation, expr[0]
+    return continuation, expr.car
 
 def _operative_if(env, expr, parent):
-    next_env = Environment({"env": env, "on_true": expr[1][0], "on_false": expr[1][1][0]}, Environment.ROOT)
+    next_env = Environment({"env": env, "on_true": expr.cdr.car, "on_false": expr.cdr.cdr.car}, Environment.ROOT)
     continuation = Continuation(next_env, _f_if, parent)
-    continuation = Continuation(env, expr[0], continuation)
+    continuation = Continuation(env, expr.car, continuation)
     return continuation, None
 
 def _operative_eq(env, expr, parent):
     return (parent,
-        expr[0] == expr[1][0]
-        if type(expr[0]) is type(expr[1][0]) in (str, int, float, bytes)
-        else expr[0] is expr[1][0]
+        expr.car == expr.cdr.car
+        if type(expr.car) is type(expr.cdr.car) in (str, int, float, bytes)
+        else expr.car is expr.cdr.car
     )
 
 def _operative_pair(env, expr, parent):
-    return parent, type(expr[0]) is tuple and expr[0] != ()
+    return parent, type(expr.car) is Pair
 
 def _operative_make_environment(_env, expr, parent):
-    parent_env = expr[0] if expr != () else Environment.ROOT
+    parent_env = expr.car if expr != () else Environment.ROOT
     return parent, Environment({}, parent_env)
 
 def _operative_continuation_to_applicative(_env, expr, parent):
-    continuation = expr[0]
+    continuation = expr.car
     if type(continuation) is not Continuation:
         return _f_error(parent, b"continuation must be type Continuation, got: ", continuation)
     env = Environment({"continuation": continuation}, Environment.ROOT)
@@ -288,7 +298,7 @@ def _operative_continuation_to_applicative(_env, expr, parent):
     return parent, Combiner(1, operative)
 
 def _operative_call_cc(env, expr, parent):
-    continuation = Continuation(env, (expr[0], (parent, ())), parent)
+    continuation = Continuation(env, Pair(expr.car, Pair(parent, ())), parent)
     return continuation, None
 
 _DEFAULT_ENV = {
@@ -326,9 +336,9 @@ def parse(tokens):
             rev_expr = expr_stack.pop()
             expr = ()
             while rev_expr != ():
-                expr, rev_expr = (rev_expr[0], expr), rev_expr[1]
+                expr, rev_expr = Pair(rev_expr.car, expr), rev_expr.cdr
             if expr_stack:
-                expr_stack[-1] = (expr, expr_stack[-1])
+                expr_stack[-1] = Pair(expr, expr_stack[-1])
             else:
                 exprs.append(expr)
         else:
@@ -351,7 +361,7 @@ def parse(tokens):
                     except ValueError:
                         token = token.lower()
             if expr_stack:
-                expr_stack[-1] = (token, expr_stack[-1])
+                expr_stack[-1] = Pair(token, expr_stack[-1])
             else:
                 exprs.append(token)
     if expr_stack:
