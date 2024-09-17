@@ -27,10 +27,11 @@ temp2
 ((unwrap reverse) (3 2 1))
 ((unwrap pair?) (1 2))
 (call/cc ($lambda (cont) ((continuation->applicative cont) 1)))
+(eq? #\a #\x61)
 ''')
 exprs = fx.parse(tokens)
 env = fx._make_standard_environment()
-for expr, expected in zip(exprs, [7, 5, 10, "a", None, "a", None, "a", "c", 1, 0, True, True, True, fx.Pair(4, 6), None, fx.Pair(1, fx.Pair(2, fx.Pair(3, ()))), True, fx.Pair(1, ())]):
+for expr, expected in zip(exprs, [7, 5, 10, "a", None, "a", None, "a", "c", 1, 0, True, True, True, fx.Pair(4, 6), None, fx.Pair(1, fx.Pair(2, fx.Pair(3, ()))), True, fx.Pair(1, ()), True]):
     actual = fx.f_eval(env, expr)
     if expected is ...:
         continue

@@ -53,6 +53,17 @@ class Pair:
             and self.cdr == other.cdr
         )
 
+class Character:
+    def __init__(self, char):
+        assert type(char) is int, f'char must be type int, got: {type(char)}'
+        assert 0 <= char < 256, f'char must be from 0 to 255, got: {char}'
+        self.char = char
+    def __eq__(self, other):
+        return self is other or (
+            type(other) is Character
+            and self.char == other.char
+        )
+
 def f_eval(env, expr):
     if type(env) is dict:
         env = Environment(env, Environment.ROOT)
@@ -90,7 +101,7 @@ def step_evaluate(continuation, value):
         continuation = Continuation(next_env, _step_call_wrapped, parent)
         continuation = Continuation(env, name, continuation)
         return continuation, None
-    elif type(expr) in (int, float, Combiner, bytes, type(...), bool, type(None), Continuation, Environment, tuple):
+    elif type(expr) in (int, float, Combiner, bytes, type(...), bool, type(None), Continuation, Environment, tuple, Character):
         return parent, expr
     elif callable(expr):
         return expr(env, value, parent=parent)
@@ -278,7 +289,7 @@ def _operative_if(env, expr, parent):
 def _operative_eq(env, expr, parent):
     return (parent,
         expr.car == expr.cdr.car
-        if type(expr.car) is type(expr.cdr.car) in (str, int, float, bytes)
+        if type(expr.car) is type(expr.cdr.car) in (str, int, float, bytes, Character)
         else expr.car is expr.cdr.car
     )
 
@@ -450,6 +461,18 @@ def parse(tokens):
                 if up > len(pair_stack):
                     raise ValueError("reference points outside of structure")
                 token = pair_stack[-up]
+            elif token[:2] == "#\\":
+                if token[2] == "x" and len(token) > 3:
+                    if len(token) != 5:
+                        raise ValueError(f'invalid character literal: {token}')
+                    if any(char not in "0123456789abcdef" for char in token[3:].lower()):
+                        raise ValueError(f'invalid character literal: {token}')
+                    char = sum(16**i * int(char, 16) for i, char in enumerate(token[3:][::-1]))
+                    token = Character(char)
+                else:
+                    if len(token) > 3:
+                        raise ValueError(f'invalid character literal: {token}')
+                    token = Character(ord(token[2]))
             elif token == "#ignore":
                 token = ...
             elif token == "#inert":
