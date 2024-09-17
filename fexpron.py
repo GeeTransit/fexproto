@@ -328,39 +328,70 @@ def parse(tokens):
     exprs = []
     expr_stack = []
     pair_stack = []
+    field_stack = []
     for token in tokens:
         if token == "(":
             # Update pair for new element
             if expr_stack:
-                pair = Pair((), ())
-                pair_stack.append(pair)
-                if expr_stack[-1] > 0:
-                    pair_stack[-2].cdr = pair
-                elif len(expr_stack) >= 2:
-                    pair_stack[-2].car = pair
-                expr_stack[-1] += 1
+                if field_stack[-1] is None:
+                    raise ValueError("unexpected element after cdr element")
+                if field_stack[-1] == "car":
+                    pair = Pair((), ())
+                    pair_stack.append(pair)
+                    if expr_stack[-1] > 0:
+                        pair_stack[-2].cdr = pair
+                    elif len(expr_stack) >= 2:
+                        if field_stack[-2] == "cdr":
+                            pair_stack[-2].cdr = pair
+                        else:
+                            pair_stack[-2].car = pair
+                    expr_stack[-1] += 1
             expr_stack.append(0)
+            field_stack.append("car")
         elif token == ")":
             if not expr_stack:
                 raise ValueError("unmatched close bracket")
+            if field_stack[-1] == "cdr":
+                raise ValueError("unexpected close bracket after dot")
+            field_stack.pop()
             expr = ()
             for _ in range(expr_stack.pop()):
                 expr = pair_stack.pop()
             # Update parent pair with list
             if expr_stack:
-                pair_stack[-1].car = expr
+                if field_stack[-1] == "cdr":
+                    pair_stack[-1].cdr = expr
+                    field_stack[-1] = None
+                else:
+                    pair_stack[-1].car = expr
             else:
                 exprs.append(expr)
+        elif token == ".":
+            if not expr_stack:
+                raise ValueError("unexpected dot outside of list")
+            if expr_stack[-1] == 0:
+                raise ValueError("unexpected dot as first element of list")
+            if field_stack[-1] == "cdr":
+                raise ValueError("unexpected dot after dot")
+            if field_stack[-1] is None:
+                raise ValueError("unexpected dot after cdr element")
+            field_stack[-1] = "cdr"
         else:
             # Update parent pair for new element
             if expr_stack:
-                pair = Pair((), ())
-                pair_stack.append(pair)
-                if expr_stack[-1] > 0:
-                    pair_stack[-2].cdr = pair
-                elif len(expr_stack) >= 2:
-                    pair_stack[-2].car = pair
-                expr_stack[-1] += 1
+                if field_stack[-1] is None:
+                    raise ValueError("unexpected element after cdr element")
+                if field_stack[-1] == "car":
+                    pair = Pair((), ())
+                    pair_stack.append(pair)
+                    if expr_stack[-1] > 0:
+                        pair_stack[-2].cdr = pair
+                    elif len(expr_stack) >= 2:
+                        if field_stack[-2] == "cdr":
+                            pair_stack[-2].cdr = pair
+                        else:
+                            pair_stack[-2].car = pair
+                    expr_stack[-1] += 1
             # Parse token
             if token[0] == '"' and token[-1] == '"' and len(token) >= 2:
                 token = token[1:-1].encode("raw_unicode_escape").decode("unicode_escape").encode("utf-8")
@@ -382,7 +413,11 @@ def parse(tokens):
                         token = token.lower()
             # Update parent pair with token
             if expr_stack:
-                pair_stack[-1].car = token
+                if field_stack[-1] == "cdr":
+                    pair_stack[-1].cdr = token
+                    field_stack[-1] = None
+                else:
+                    pair_stack[-1].car = token
             else:
                 exprs.append(token)
     if expr_stack:
