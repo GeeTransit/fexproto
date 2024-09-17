@@ -393,8 +393,57 @@ def parse(tokens):
                             pair_stack[-2].car = pair
                     expr_stack[-1] += 1
             # Parse token
-            if token[0] == '"' and token[-1] == '"' and len(token) >= 2:
-                token = token[1:-1].encode("raw_unicode_escape").decode("unicode_escape").encode("utf-8")
+            if token[0] == '"':
+                string = bytearray()
+                i = 1
+                while i < len(token):
+                    char = token[i]
+                    if char == '"':
+                        if i != len(token) - 1:
+                            raise ValueError("unexpected end of string")
+                        break
+                    if char != "\\":
+                        string.extend(char.encode("utf-8"))
+                        i += 1
+                    else:
+                        if i + 1 >= len(token):
+                            raise ValueError("unexpected end of string in escape sequence")
+                        char = token[i + 1]
+                        if char in "\\'\"":
+                            string.append(ord(char))
+                            i += 2
+                        elif char in "abfnrtv":
+                            string.append(b"\a\b\f\n\r\t\v"["abfnrtv".index(char)])
+                            i += 2
+                        elif char == "x":
+                            if i + 4 > len(token):
+                                raise ValueError("unexpected end of string in escape sequence")
+                            if any(char not in "0123456789abcdef" for char in token[i+2:i+4].lower()):
+                                raise ValueError(f'invalid escape sequence: {token[i:i+4]}')
+                            char = sum(16**i * int(char, 16) for i, char in enumerate(token[i+2:i+4][::-1]))
+                            string.append(char)
+                            i += 4
+                        elif char == "u":
+                            if i + 6 > len(token):
+                                raise ValueError("unexpected end of string in escape sequence")
+                            if any(char not in "0123456789abcdef" for char in token[i+2:i+6].lower()):
+                                raise ValueError(f'invalid escape sequence: {token[i:i+6]}')
+                            char = sum(16**i * int(char, 16) for i, char in enumerate(token[i+2:i+6][::-1]))
+                            string.extend(chr(char).encode("utf-8"))
+                            i += 6
+                        elif char == "U":
+                            if i + 10 > len(token):
+                                raise ValueError("unexpected end of string in escape sequence")
+                            if any(char not in "0123456789abcdef" for char in token[i+2:i+10].lower()):
+                                raise ValueError(f'invalid escape sequence: {token[i:i+10]}')
+                            char = sum(16**i * int(char, 16) for i, char in enumerate(token[i+2:i+10][::-1]))
+                            string.extend(chr(char).encode("utf-8"))
+                            i += 10
+                        else:
+                            raise ValueError(f'invalid escape sequence: {token[i:i+2]}')
+                else:
+                    raise ValueError("unexpected end of string")
+                token = bytes(string)
             elif token[:2] == "#.":
                 assert all(char == "." for char in token[1:]), "reference must only contain dots"
                 up = len(token) - 1
