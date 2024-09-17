@@ -327,21 +327,41 @@ def tokenize(text):
 def parse(tokens):
     exprs = []
     expr_stack = []
+    pair_stack = []
     for token in tokens:
         if token == "(":
-            expr_stack.append(())
+            # Update pair for new element
+            if expr_stack:
+                pair = Pair((), ())
+                pair_stack.append(pair)
+                if expr_stack[-1] > 0:
+                    pair_stack[-2].cdr = pair
+                elif len(expr_stack) >= 2:
+                    pair_stack[-2].car = pair
+                expr_stack[-1] += 1
+            expr_stack.append(0)
         elif token == ")":
             if not expr_stack:
                 raise ValueError("unmatched close bracket")
-            rev_expr = expr_stack.pop()
             expr = ()
-            while rev_expr != ():
-                expr, rev_expr = Pair(rev_expr.car, expr), rev_expr.cdr
+            for _ in range(expr_stack.pop()):
+                expr = pair_stack.pop()
+            # Update parent pair with list
             if expr_stack:
-                expr_stack[-1] = Pair(expr, expr_stack[-1])
+                pair_stack[-1].car = expr
             else:
                 exprs.append(expr)
         else:
+            # Update parent pair for new element
+            if expr_stack:
+                pair = Pair((), ())
+                pair_stack.append(pair)
+                if expr_stack[-1] > 0:
+                    pair_stack[-2].cdr = pair
+                elif len(expr_stack) >= 2:
+                    pair_stack[-2].car = pair
+                expr_stack[-1] += 1
+            # Parse token
             if token[0] == '"' and token[-1] == '"' and len(token) >= 2:
                 token = token[1:-1].encode("raw_unicode_escape").decode("unicode_escape").encode("utf-8")
             elif token == "#ignore":
@@ -360,8 +380,9 @@ def parse(tokens):
                         token = int(token)
                     except ValueError:
                         token = token.lower()
+            # Update parent pair with token
             if expr_stack:
-                expr_stack[-1] = Pair(token, expr_stack[-1])
+                pair_stack[-1].car = token
             else:
                 exprs.append(token)
     if expr_stack:
