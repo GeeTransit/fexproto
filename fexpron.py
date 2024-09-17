@@ -395,6 +395,12 @@ def parse(tokens):
             # Parse token
             if token[0] == '"' and token[-1] == '"' and len(token) >= 2:
                 token = token[1:-1].encode("raw_unicode_escape").decode("unicode_escape").encode("utf-8")
+            elif token[:2] == "#.":
+                assert all(char == "." for char in token[1:]), "reference must only contain dots"
+                up = len(token) - 1
+                if up > len(pair_stack):
+                    raise ValueError("reference points outside of structure")
+                token = pair_stack[-up]
             elif token == "#ignore":
                 token = ...
             elif token == "#inert":
