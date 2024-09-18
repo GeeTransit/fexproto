@@ -1,8 +1,6 @@
 ($define! $car (unwrap car))
 ($define! $cdr (unwrap cdr))
 ($define! $cons (unwrap cons))
-($define! get-current-environment (wrap ($vau (env _) env)))
-($define! make-standard-environment (wrap ($vau (_1 _2) (get-current-environment))))
 ($define! list (wrap ($vau (_ args) args)))
 ($define! $sequence
 	((wrap ($vau (_ $seq2)
@@ -42,10 +40,12 @@
 							((continuation->applicative error-continuation) "expected\x20cons\x20match\x20on\x20" name ",\x20got\x20" val))
 						(eval env (list $basic-define! name (cons (unwrap list) val)))))))))
 		($vau (env name-expr)
-			(eval env (list
-				$aux-define!
-				(car name-expr)
-				(eval env (car (cdr name-expr))))))))))
+			($if (eq? (cdr (cdr name-expr)) ())
+				(eval env (list
+					$aux-define!
+					(car name-expr)
+					(eval env (car (cdr name-expr)))))
+				((continuation->applicative error-continuation) "expected\x20only\x20two\x20arguments")))))))
 ($define! $vau
 	(($vau (_1 _2) ($sequence
 		($define! $basic-vau $vau)
@@ -55,6 +55,7 @@
 					($define! env (make-environment static))
 					(eval env (list $define! (car name-body) (list (unwrap list) dyn val)))
 					(eval env (cons $sequence (cdr name-body))))))))))
+($define! get-current-environment (wrap ($vau (env ()) env)))
 ($define! $lambda
 	($vau (static name-body)
 		(wrap (eval static
@@ -63,3 +64,4 @@
 			(cons
 				(list #ignore (car name-body))
 				(cdr name-body)))))))
+($define! make-standard-environment ($lambda () (get-current-environment)))
