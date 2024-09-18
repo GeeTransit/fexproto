@@ -246,6 +246,9 @@ def _f_abnormal_pass(env, _value, parent):
 def _operative_plus(env, expr, parent):
     return parent, expr.car + expr.cdr.car
 
+def _operative_lessequal(env, expr, parent):
+    return parent, expr.car <= expr.cdr.car
+
 def _operative_vau(env, expr, parent):
     # ($vau (envname name) body)
     operative = Operative(env=env, envname=expr.car.car, name=expr.car.cdr.car, body=expr.cdr.car)
@@ -314,6 +317,7 @@ def _operative_call_cc(env, expr, parent):
 
 _DEFAULT_ENV = {
     "+": Combiner(1, _operative_plus),
+    "<=?": Combiner(1, _operative_lessequal),
     "$vau": Combiner(0, _operative_vau),
     "eval": Combiner(1, _operative_eval),
     "wrap": Combiner(1, _operative_wrap),
