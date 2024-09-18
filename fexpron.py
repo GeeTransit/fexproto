@@ -315,6 +315,18 @@ def _operative_call_cc(env, expr, parent):
     continuation = Continuation(env, Pair(expr.car, Pair(parent, ())), parent)
     return continuation, None
 
+def _operative_read_char(env, expr, parent):
+    import sys
+    char = sys.stdin.buffer.read(1)
+    if not char:
+        return _f_error(parent, b"end of file reached")
+    return parent, Character(char[0])
+
+def _operative_write_char(env, expr, parent):
+    import sys
+    sys.stdout.buffer.write(bytes([expr.car.char]))
+    return parent, None
+
 _DEFAULT_ENV = {
     "+": Combiner(1, _operative_plus),
     "<=?": Combiner(1, _operative_lessequal),
@@ -334,6 +346,8 @@ _DEFAULT_ENV = {
     "continuation->applicative": Combiner(1, _operative_continuation_to_applicative),
     "call/cc": Combiner(1, _operative_call_cc),
     "error-continuation": Continuation.ERROR,
+    "read-char": Combiner(1, _operative_read_char),
+    "write-char": Combiner(1, _operative_write_char),
 }
 
 def tokenize(text):
