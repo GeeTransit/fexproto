@@ -96,6 +96,8 @@ def step_evaluate(continuation, value):
         return _f_error(parent, b"binding not found: ", expr)
     elif type(expr) is Pair:
         name, args = expr.car, expr.cdr
+        if type(name) is Pair and name.car is name:
+            return _f_error(parent, b"infinite recursive evaluation of combiner detected")
         # evaluate car of call
         next_env = Environment({"env": env, "args": args}, Environment.ROOT)
         continuation = Continuation(next_env, _step_call_wrapped, parent)
