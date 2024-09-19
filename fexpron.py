@@ -317,6 +317,15 @@ def _operative_call_cc(env, expr, parent):
     continuation = Continuation(env, Pair(expr.car, Pair(parent, ())), parent)
     return continuation, None
 
+def _operative_extend_continuation(env, expr, parent):
+    continuation = expr.car
+    applicative = expr.cdr.car
+    environment = expr.cdr.cdr.car if expr.cdr.cdr != () else Environment({}, Environment.ROOT)
+    if applicative.num_wraps != 1:
+        return _f_error(parent, b"applicative unwrapped must be an operative")
+    new_continuation = Continuation(environment, applicative.func, continuation)
+    return parent, new_continuation
+
 def _operative_read_char(env, expr, parent):
     import sys
     char = sys.stdin.buffer.read(1)
@@ -347,6 +356,7 @@ _DEFAULT_ENV = {
     "make-environment": Combiner(1, _operative_make_environment),
     "continuation->applicative": Combiner(1, _operative_continuation_to_applicative),
     "call/cc": Combiner(1, _operative_call_cc),
+    "extend-continuation": Combiner(1, _operative_extend_continuation),
     "error-continuation": Continuation.ERROR,
     "read-char": Combiner(1, _operative_read_char),
     "write-char": Combiner(1, _operative_write_char),
