@@ -83,6 +83,22 @@ def _f_error(parent, *args):
     continuation = Continuation(Environment.ROOT, expr, parent)
     return continuation, None
 
+def _f_copy_es(obj, *, seen=None, immutable=False):
+    if type(obj) is not Pair:
+        return obj
+    if obj.immutable:
+        return obj
+    if seen is None:
+        seen = {}
+    if id(obj) in seen:
+        return seen[id(obj)]
+    pair = Pair((), ())
+    seen[id(obj)] = pair
+    pair.car = _f_copy_es(obj.car, seen=seen, immutable=immutable)
+    pair.cdr = _f_copy_es(obj.cdr, seen=seen, immutable=immutable)
+    pair.immutable = immutable
+    return pair
+
 # given a continuation and a value, get the next continuation and value
 def step_evaluate(continuation, value):
     env = continuation.env
@@ -253,7 +269,7 @@ def _operative_lessequal(env, expr, parent):
 
 def _operative_vau(env, expr, parent):
     # ($vau (envname name) body)
-    operative = Operative(env=env, envname=expr.car.car, name=expr.car.cdr.car, body=expr.cdr.car)
+    operative = Operative(env=env, envname=expr.car.car, name=expr.car.cdr.car, body=_f_copy_es(expr.cdr.car, immutable=True))
     return parent, Combiner(0, operative)
 
 def _operative_eval(env, expr, parent):
@@ -280,6 +296,24 @@ def _operative_cdr(env, expr, parent):
 
 def _operative_cons(env, expr, parent):
     return parent, Pair(expr.car, expr.cdr.car)
+
+def _operative_set_car(env, expr, parent):
+    if expr.car.immutable:
+        return _f_error(parent, b"pair must be mutable")
+    expr.car.car = expr.cdr.car
+    return parent, None
+
+def _operative_set_cdr(env, expr, parent):
+    if expr.car.immutable:
+        return _f_error(parent, b"pair must be mutable")
+    expr.car.cdr = expr.cdr.car
+    return parent, None
+
+def _operative_copy_es(env, expr, parent):
+    return parent, _f_copy_es(expr.car)
+
+def _operative_copy_es_immutable(env, expr, parent):
+    return parent, _f_copy_es(expr.car, immutable=True)
 
 def _operative_load(env, expr, parent):
     continuation = Continuation(env, _f_load, parent)
@@ -349,6 +383,10 @@ _DEFAULT_ENV = {
     "car": Combiner(1, _operative_car),
     "cdr": Combiner(1, _operative_cdr),
     "cons": Combiner(1, _operative_cons),
+    "set-car!": Combiner(1, _operative_set_car),
+    "set-cdr!": Combiner(1, _operative_set_cdr),
+    "copy-es": Combiner(1, _operative_copy_es),
+    "copy-es-immutable": Combiner(1, _operative_copy_es_immutable),
     "load": Combiner(1, _operative_load),
     "$if": Combiner(0, _operative_if),
     "eq?": Combiner(1, _operative_eq),

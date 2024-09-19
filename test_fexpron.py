@@ -33,10 +33,15 @@ temp2
     ((continuation->applicative
             (extend-continuation cont ($lambda (x) (+ x 1))))
         1)))
+(($lambda ()
+    ($define! p (cons 1 2))
+    (set-car! p 3)
+    (set-cdr! p 4)
+    ($if (eq? 3 (car p)) (eq? 4 (cdr p)) #f)))
 ''')
 exprs = fx.parse(tokens)
 env = fx._make_standard_environment()
-for expr, expected in zip(exprs, [7, 5, 10, "a", None, "a", None, "a", "c", 1, 0, True, True, True, fx.Pair(4, 6), None, fx.Pair(1, fx.Pair(2, fx.Pair(3, ()))), True, fx.Pair(1, ()), True, True, 2]):
+for expr, expected in zip(exprs, [7, 5, 10, "a", None, "a", None, "a", "c", 1, 0, True, True, True, fx.Pair(4, 6), None, fx.Pair(1, fx.Pair(2, fx.Pair(3, ()))), True, fx.Pair(1, ()), True, True, 2, True]):
     actual = fx.f_eval(env, expr)
     if expected is ...:
         continue

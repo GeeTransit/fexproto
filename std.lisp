@@ -50,11 +50,14 @@
 	(($vau (_1 _2) ($sequence
 		($define! $basic-vau $vau)
 		($vau (static name-body)
-			($basic-vau (dyn val)
-				($sequence
-					($define! env (make-environment static))
-					(eval env (list $define! (car name-body) (list (unwrap list) dyn val)))
-					(eval env (cons $sequence (cdr name-body))))))))))
+			($sequence
+				($define! name (copy-es-immutable (car name-body)))
+				($define! body (copy-es-immutable (cdr name-body)))
+				($basic-vau (dyn val)
+					($sequence
+						($define! env (make-environment static))
+						(eval env (list $define! name (list (unwrap list) dyn val)))
+						(eval env (cons $sequence body))))))))))
 ($define! get-current-environment (wrap ($vau (env ()) env)))
 ($define! $lambda
 	($vau (static name-body)
