@@ -2,6 +2,11 @@
 ($define! $cdr (unwrap cdr))
 ($define! $cons (unwrap cons))
 ($define! list (wrap ($vau (_ args) args)))
+($define! error
+	(wrap
+		($vau (dyn error-args)
+			(eval dyn
+				(cons (unwrap (continuation->applicative error-continuation)) error-args)))))
 ($define! $sequence
 	((wrap ($vau (_ $seq2)
 			((car $seq2)
@@ -31,13 +36,13 @@
 				($if (eq? name ())
 					($if (eq? val ())
 						#inert
-						((continuation->applicative error-continuation) "expected\x20nil\x20match,\x20got:\x20" val))
+						(error "expected\x20nil\x20match,\x20got:\x20" val))
 					($if (pair? name)
 						($if (pair? val)
 							($sequence
 								(eval env (list $aux-define! (car name) (car val)))
 								(eval env (list $aux-define! (cdr name) (cdr val))))
-							((continuation->applicative error-continuation) "expected\x20cons\x20match\x20on\x20" name ",\x20got\x20" val))
+							(error "expected\x20cons\x20match\x20on\x20" name ",\x20got\x20" val))
 						(eval env (list $basic-define! name (cons (unwrap list) val)))))))))
 		($vau (env name-expr)
 			($if (eq? (cdr (cdr name-expr)) ())
@@ -45,7 +50,7 @@
 					$aux-define!
 					(car name-expr)
 					(eval env (car (cdr name-expr)))))
-				((continuation->applicative error-continuation) "expected\x20only\x20two\x20arguments")))))))
+				(error "expected\x20only\x20two\x20arguments")))))))
 ($define! $vau
 	(($vau (_1 _2) ($sequence
 		($define! $basic-vau $vau)
