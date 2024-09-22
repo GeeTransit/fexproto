@@ -261,6 +261,18 @@ def _f_if(env, result, parent):
 def _f_abnormal_pass(env, _value, parent):
     return env.parent.bindings["continuation"], env.bindings["value"]
 
+def _operative_number(env, expr, parent):
+    return parent, type(expr.car) in (int, float)
+
+def _operative_symbol(env, expr, parent):
+    return parent, type(expr.car) is str
+
+def _operative_symbol_to_string(env, expr, parent):
+    return parent, expr.car.encode("latin-1")
+
+def _operative_string_to_symbol(env, expr, parent):
+    return parent, expr.car.decode("latin-1")
+
 def _operative_plus(env, expr, parent):
     return parent, expr.car + expr.cdr.car
 
@@ -335,9 +347,15 @@ def _operative_eq(env, expr, parent):
 def _operative_pair(env, expr, parent):
     return parent, type(expr.car) is Pair
 
+def _operative_environment(env, expr, parent):
+    return parent, type(expr.car) is Environment
+
 def _operative_make_environment(_env, expr, parent):
     parent_env = expr.car if expr != () else Environment.ROOT
     return parent, Environment({}, parent_env)
+
+def _operative_continuation(env, expr, parent):
+    return parent, type(expr.car) is Continuation
 
 def _operative_continuation_to_applicative(_env, expr, parent):
     continuation = expr.car
@@ -360,6 +378,9 @@ def _operative_extend_continuation(env, expr, parent):
     new_continuation = Continuation(environment, applicative.func, continuation)
     return parent, new_continuation
 
+def _operative_char(env, expr, parent):
+    return parent, type(expr.car) is Character
+
 def _operative_read_char(env, expr, parent):
     import sys
     char = sys.stdin.buffer.read(1)
@@ -371,6 +392,9 @@ def _operative_write_char(env, expr, parent):
     import sys
     sys.stdout.buffer.write(bytes([expr.car.char]))
     return parent, None
+
+def _operative_string(env, expr, parent):
+    return parent, type(expr.car) is bytes
 
 def _operative_list_to_string(env, expr, parent):
     chars = expr.car
@@ -394,6 +418,10 @@ def _operative_string_to_list(env, expr, parent):
     return parent, chars
 
 _DEFAULT_ENV = {
+    "number?": Combiner(1, _operative_number),
+    "symbol?": Combiner(1, _operative_symbol),
+    "symbol->string": Combiner(1, _operative_symbol_to_string),
+    "string->symbol": Combiner(1, _operative_string_to_symbol),
     "+": Combiner(1, _operative_plus),
     "<=?": Combiner(1, _operative_lessequal),
     "$vau": Combiner(0, _operative_vau),
@@ -412,13 +440,17 @@ _DEFAULT_ENV = {
     "$if": Combiner(0, _operative_if),
     "eq?": Combiner(1, _operative_eq),
     "pair?": Combiner(1, _operative_pair),
+    "environment?": Combiner(1, _operative_environment),
     "make-environment": Combiner(1, _operative_make_environment),
+    "continuation?": Combiner(1, _operative_continuation),
     "continuation->applicative": Combiner(1, _operative_continuation_to_applicative),
     "call/cc": Combiner(1, _operative_call_cc),
     "extend-continuation": Combiner(1, _operative_extend_continuation),
     "error-continuation": Continuation.ERROR,
+    "char?": Combiner(1, _operative_char),
     "read-char": Combiner(1, _operative_read_char),
     "write-char": Combiner(1, _operative_write_char),
+    "string?": Combiner(1, _operative_string),
     "list->string": Combiner(1, _operative_list_to_string),
     "string->list": Combiner(1, _operative_string_to_list),
 }
