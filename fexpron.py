@@ -372,6 +372,27 @@ def _operative_write_char(env, expr, parent):
     sys.stdout.buffer.write(bytes([expr.car.char]))
     return parent, None
 
+def _operative_list_to_string(env, expr, parent):
+    chars = expr.car
+    p, n, a, c = _get_list_metrics(chars)
+    if n == 0 or c > 0:
+        return _f_error(parent, b"list->string argument must be finite list, got: ", chars)
+    string = bytearray()
+    for _ in range(a):
+        string.append(chars.car.char)
+        chars = chars.cdr
+    return parent, bytes(string)
+
+def _operative_string_to_list(env, expr, parent):
+    string = expr.car
+    if not len(string):
+        return parent, ()
+    chars = Pair(Character(string[0]), ())
+    curr = chars
+    for char in memoryview(string[1:]):
+        curr.cdr = curr = Pair(Character(char), ())
+    return parent, chars
+
 _DEFAULT_ENV = {
     "+": Combiner(1, _operative_plus),
     "<=?": Combiner(1, _operative_lessequal),
@@ -398,6 +419,8 @@ _DEFAULT_ENV = {
     "error-continuation": Continuation.ERROR,
     "read-char": Combiner(1, _operative_read_char),
     "write-char": Combiner(1, _operative_write_char),
+    "list->string": Combiner(1, _operative_list_to_string),
+    "string->list": Combiner(1, _operative_string_to_list),
 }
 
 def tokenize(text):
