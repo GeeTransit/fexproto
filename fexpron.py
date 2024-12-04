@@ -309,22 +309,6 @@ def _step_call_evcar(static, value, parent):
             done = next_
         return parent, prev
 
-# load a file in an environment
-def _f_load(env, expr, *, parent=None):
-    with open(expr.decode("utf-8")) as file:
-        text = file.read()
-    tokens = tokenize(text)
-    try:
-        exprs = parse(tokens, filename=expr.decode("utf-8"))
-    except ValueError as e:
-        return _f_error(parent, b"error while loading file", expr, repr(e).encode("utf-8"))
-    args = ()
-    for expr in reversed(exprs): args = Pair(expr, args)
-    continuation = Continuation(env, None, parent)
-    next_env = Environment({"env": env, "num_wraps": 1, "p": len(exprs)}, Environment.ROOT)
-    continuation = Continuation(next_env, _step_call_evlis, continuation)
-    return continuation, args
-
 # modify environment according to name
 def _f_define(static, expr, parent):
     env = static.bindings["env"]
@@ -416,9 +400,23 @@ def _operative_copy_es(env, expr, parent):
 def _operative_copy_es_immutable(env, expr, parent):
     return parent, _f_copy_es(expr.car, immutable=True)
 
+# load a file in an environment
 def _operative_load(env, expr, parent):
-    continuation = Continuation(env, _f_load, parent)
-    return continuation, expr.car
+    filename = expr.car
+    filename_str = filename.decode("utf-8")
+    with open(filename_str) as file:
+        text = file.read()
+    tokens = tokenize(text)
+    try:
+        exprs = parse(tokens, filename=filename_str)
+    except ValueError as e:
+        return _f_error(parent, b"error while loading file", filename, repr(e).encode("utf-8"))
+    args = ()
+    for expr in reversed(exprs): args = Pair(expr, args)
+    continuation = Continuation(env, None, parent)
+    next_env = Environment({"env": env, "num_wraps": 1, "p": len(exprs)}, Environment.ROOT)
+    continuation = Continuation(next_env, _step_call_evlis, continuation)
+    return continuation, args
 
 def _operative_if(env, expr, parent):
     next_env = Environment({"env": env, "on_true": expr.cdr.car, "on_false": expr.cdr.cdr.car}, Environment.ROOT)
