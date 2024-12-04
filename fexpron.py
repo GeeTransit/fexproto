@@ -538,6 +538,7 @@ _DEFAULT_ENV = {
     "call/cc": Combiner(1, _operative_call_cc),
     "extend-continuation": Combiner(1, _operative_extend_continuation),
     "error-continuation": Continuation.ERROR,
+    "root-continuation": Continuation.ROOT,
     "char?": Combiner(1, _operative_char),
     "read-char": Combiner(1, _operative_read_char),
     "write-char": Combiner(1, _operative_write_char),
@@ -843,6 +844,8 @@ def main(env=None):
         env = _make_standard_environment()
     if type(env) is dict:
         env = Environment(env, Environment.ROOT)
+    # Fake continuation to represent the interpreter
+    main_continuation = Continuation(Environment.ROOT, _f_passthrough, Continuation.ROOT)
 
     with open(sys.argv[1] if len(sys.argv) >= 2 else 0, mode="rb") as file:
         reader = _Reader(lambda: file.read(1), sys.argv[1] if len(sys.argv) >= 2 else "\x00stdin")
@@ -864,7 +867,7 @@ def main(env=None):
                 continue
             expr = _f_copy_es(expr, immutable=True)
 
-            continuation = Continuation(Environment.ROOT, _f_passthrough, Continuation.ROOT)
+            continuation = Continuation(Environment.ROOT, _f_passthrough, main_continuation)
             continuation._call_info = ["repl eval", expr]
             continuation, value = Continuation(env, expr, continuation), None
             while continuation is not Continuation.ROOT:
@@ -889,10 +892,13 @@ def main(env=None):
                         env.bindings["last-error-message"] = message
                         break
                     exit(1)
+                if continuation is main_continuation:
+                    if not len(sys.argv) >= 2:
+                        print(end="> ");_f_write(value);print()
+                        env.bindings["last-value"] = value
+                    break
             else:
-                if not len(sys.argv) >= 2:
-                    print(end="> ");_f_write(value);print()
-                    env.bindings["last-value"] = value
+                return
 
 if __name__ == "__main__":
     main()
