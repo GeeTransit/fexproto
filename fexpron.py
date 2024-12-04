@@ -841,32 +841,56 @@ def _f_print_trace(c):
 
 def main(env=None):
     import sys
-    with open(sys.argv[1] if len(sys.argv) >= 2 else 0) as file:
-        text = file.read()
-    tokens = tokenize(text)
-    try:
-        exprs = parse(tokens, filename=sys.argv[1] if len(sys.argv) >= 2 else "\x00stdin")
-    except ValueError as e:
-        exit(e)
     if env is None:
         env = _make_standard_environment()
     if type(env) is dict:
         env = Environment(env, Environment.ROOT)
-    for expr in exprs:
-        continuation = Continuation(Environment.ROOT, _f_passthrough, Continuation.ROOT)
-        continuation._call_info = ["repl eval", expr]
-        continuation, value = Continuation(env, expr, continuation), None
-        while continuation is not Continuation.ROOT:
-            continuation, value = step_evaluate(continuation, value)
-            if continuation is Continuation.ERROR:
-                message = value
-                if type(message) is Pair and type(message.car) is Continuation:
-                    print("! --- stack trace ---")
-                    _f_print_trace(message.car)
-                    message = message.cdr
-                print(end="! ");_f_write(Pair("error", message));print()
-                exit(1)
-        print(end="> ");_f_write(value);print()
+
+    with open(sys.argv[1] if len(sys.argv) >= 2 else 0, mode="rb") as file:
+        reader = _Reader(lambda: file.read(1), sys.argv[1] if len(sys.argv) >= 2 else "\x00stdin")
+        while True:
+            try:
+                expr = reader.read()
+            except EOFError:
+                break
+            except ValueError as e:
+                if len(sys.argv) >= 2:
+                    raise
+                _syntax_error = Pair(type(e).__name__.encode("utf-8"), Pair(", ".join(e.args).encode("utf-8"), ()))
+                print(end="! ");_f_write(Pair("syntax-error", _syntax_error));print()
+                while reader.curr not in b"\n":
+                    reader.next
+                if reader.curr == b"":
+                    break
+                reader = _Reader(lambda: file.read(1), sys.argv[1] if len(sys.argv) >= 2 else "\x00stdin")
+                continue
+            expr = _f_copy_es(expr, immutable=True)
+
+            continuation = Continuation(Environment.ROOT, _f_passthrough, Continuation.ROOT)
+            continuation._call_info = ["repl eval", expr]
+            continuation, value = Continuation(env, expr, continuation), None
+            while continuation is not Continuation.ROOT:
+                try:
+                    continuation, value = step_evaluate(continuation, value)
+                except Exception as e:
+                    value = Pair(continuation.parent, Pair(type(e).__name__.encode("utf-8"), Pair(", ".join(map(str, e.args)).encode("utf-8"), ())))
+                    continuation = Continuation.ERROR
+                    error_kind = "internal-error"
+                else:
+                    error_kind = "error"
+                if continuation is Continuation.ERROR:
+                    message = value
+                    if type(message) is Pair and type(message.car) is Continuation:
+                        print("! --- stack trace ---")
+                        error_continuation, message = message.car, message.cdr
+                        _f_print_trace(error_continuation)
+                    print(end="! ");_f_write(Pair(error_kind, message));print()
+                    if not len(sys.argv) >= 2:
+                        break
+                    exit(1)
+            else:
+                if not len(sys.argv) >= 2:
+                    print(end="> ");_f_write(value);print()
 
 if __name__ == "__main__":
     main()
