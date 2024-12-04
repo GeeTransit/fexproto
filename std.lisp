@@ -82,3 +82,81 @@
 				(list #ignore name)
 				body))))))
 ($define! make-standard-environment ($lambda () (get-current-environment)))
+($define! null? ($lambda (item) (eq? () item)))
+($define! $cond
+	($vau (env ((cond . exprs) . rest))
+		($if (eval env cond)
+			(eval env (cons $sequence exprs))
+			(eval env (cons $cond rest)))))
+($define! apply
+	($lambda (func args . env)
+		(eval
+			($cond
+				((null? env) (make-environment))
+				((null? (cdr env)) (car env))
+				(#t (error "apply takes two or three arguments")))
+			(cons (unwrap func) args))))
+($define! list-tail
+	($lambda (object offset)
+		($cond
+			((eq? offset 0)
+				object)
+			((<=? offset 0)
+				(error "expected\x20non-negative\x20offset\x20to\x20list-tail"))
+			(#t
+				(list-tail (cdr object) (+ offset -1))))))
+($define! $provide!
+	($vau (env (symbols . body))
+		(eval env
+			(list $define! symbols
+				(list
+					(list $lambda ()
+						(cons $sequence body)
+						(cons list symbols)))))))
+($provide! (get-list-metrics)
+	($define! find-cycle
+		($lambda (tortoise hare offset)
+			($if (eq? tortoise hare)
+				offset
+				(find-cycle (cdr tortoise) (cdr hare) (+ 1 offset)))))
+	($define! brent
+		($lambda (tortoise hare hare-distance hare-power list-length obj)
+			($cond
+				((eq? #f (pair? hare))
+					(list (+ list-length hare-distance) ($if (eq? hare ()) 1 0) (+ list-length hare-distance) 0))
+				((eq? tortoise hare)
+					($define! offset (find-cycle obj (list-tail obj hare-distance) 0))
+					(list (+ offset hare-distance) 0 offset hare-distance))
+				((eq? hare-distance hare-power)
+					(brent hare (cdr hare) 1 (+ hare-power hare-power) (+ list-length hare-distance) obj))
+				(#t
+					(brent tortoise (cdr hare) (+ 1 hare-distance) hare-power list-length obj)))))
+	($define! get-list-metrics
+		($lambda (obj)
+			($if (pair? obj)
+				(brent obj (cdr obj) 1 1 0 obj)
+				(list 0 ($if (eq? obj ()) 1 0) 0 0)))))
+($define! assq
+	($lambda (obj list)
+		($if (null? list)
+			()
+			($if (eq? (car (car list)) obj)
+				(car list)
+				(assq obj (cdr list))))))
+($define! append
+	($lambda args
+		($cond
+			((null? args)
+				())
+			((null? (cdr args))
+				(car args))
+			((null? (car args))
+				(apply append (cdr args)))
+			((eq? #f (pair? (car args)))
+				(error "expected\x20cons\x20cell,\x20got:\x20" (car args)))
+			(#t
+				(cons
+					(car (car args))
+					(apply append (cons
+						(cdr (car args))
+						(cdr args))))))))
