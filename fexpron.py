@@ -67,7 +67,9 @@ class Character:
 def f_eval(env, expr):
     if type(env) is dict:
         env = Environment(env, Environment.ROOT)
-    continuation, value = Continuation(env, expr, Continuation.ROOT), None
+    continuation = Continuation(Environment.ROOT, _f_passthrough, Continuation.ROOT)
+    continuation._call_info = ["f_eval", expr]
+    continuation, value = Continuation(env, expr, continuation), None
     while continuation is not Continuation.ROOT:
         continuation, value = step_evaluate(continuation, value)
         if continuation is Continuation.ERROR:
@@ -79,6 +81,7 @@ def _f_error(parent, *args):
     error_operative = Pair(Combiner(1, _operative_unwrap), Pair(error_applicative, ()))
     message_tree = ()
     for arg in reversed(args): message_tree = Pair(arg, message_tree)
+    message_tree = Pair(parent, message_tree)
     expr = Pair(error_operative, message_tree)
     continuation = Continuation(Environment.ROOT, expr, parent)
     return continuation, None
@@ -187,6 +190,7 @@ def step_evaluate(continuation, value):
         next_env = Environment({"env": env, "args": args}, Environment.ROOT)
         continuation = Continuation(next_env, _step_call_wrapped, parent)
         continuation = Continuation(Environment.ROOT, _step_call_combcar, continuation)
+        continuation._call_info = ["eval combiner car", expr.car]  # non-tail call
         continuation = Continuation(env, name, continuation)
         return continuation, None
     elif type(expr) in (int, float, Combiner, bytes, type(...), bool, type(None), Continuation, Environment, tuple, Character):
@@ -293,6 +297,7 @@ def _step_call_evcar(static, value, parent):
         static.bindings["pending"] = pending.cdr
         static.bindings["done"] = done
         continuation = Continuation(static, _step_call_evcar, parent)
+        continuation._call_info = ["eval combiner arg", pending.car]
         continuation = Continuation(env, pending.car, continuation)
         return continuation, None
     else:
@@ -337,6 +342,9 @@ def _f_if(env, result, parent):
 def _f_abnormal_pass(env, _value, parent):
     return env.parent.bindings["continuation"], env.bindings["value"]
 
+def _f_passthrough(_env, value, parent):  # Useful for root REPL continuations
+    return parent, value
+
 def _operative_number(env, expr, parent):
     return parent, type(expr.car) in (int, float)
 
@@ -373,6 +381,7 @@ def _operative_unwrap(env, expr, parent):
 def _operative_define(env, expr, parent):
     next_env = Environment({"env": env, "name": expr.car}, Environment.ROOT)
     continuation = Continuation(next_env, _f_define, parent)
+    continuation._call_info = ["define value", expr.cdr.car]  # non-tail call
     continuation = Continuation(env, expr.cdr.car, continuation)
     return continuation, None
 
@@ -410,6 +419,7 @@ def _operative_load(env, expr, parent):
 def _operative_if(env, expr, parent):
     next_env = Environment({"env": env, "on_true": expr.cdr.car, "on_false": expr.cdr.cdr.car}, Environment.ROOT)
     continuation = Continuation(next_env, _f_if, parent)
+    continuation._call_info = ["if condition", expr.car]  # non-tail call
     continuation = Continuation(env, expr.car, continuation)
     return continuation, None
 
@@ -442,7 +452,10 @@ def _operative_continuation_to_applicative(_env, expr, parent):
     return parent, Combiner(1, operative)
 
 def _operative_call_cc(env, expr, parent):
-    continuation = Continuation(env, Pair(expr.car, Pair(parent, ())), parent)
+    combiner = expr.car
+    if type(combiner) is not Combiner:
+        return _f_error(parent, b"argument must be type Combiner, got: ", combiner)
+    continuation = Continuation(env, Pair(combiner, Pair(parent, ())), parent)
     return continuation, None
 
 def _operative_extend_continuation(env, expr, parent):
@@ -754,7 +767,9 @@ def _make_standard_environment(*, primitives=None):
 
     # evaluate in standard environment
     for expr in exprs:
-        continuation, value = Continuation(env, expr, Continuation.ROOT), None
+        continuation = Continuation(Environment.ROOT, _f_passthrough, Continuation.ROOT)
+        continuation._call_info = ["stdlib eval", expr]
+        continuation, value = Continuation(env, expr, continuation), None
         while continuation is not Continuation.ROOT:
             continuation, value = step_evaluate(continuation, value)
             if continuation is Continuation.ERROR:
@@ -763,6 +778,62 @@ def _make_standard_environment(*, primitives=None):
     # return child of standard environment
     env = Environment({}, env)
     return env
+
+def _f_print_trace(c):
+    _FILE_LINES_CACHE = {}
+    RJUST = 7
+
+    # Print in reversed order to see the most relevant code earlier
+    frames = []
+    while c is not Continuation.ROOT:
+        frames.append(c)
+        c = c.parent
+
+    for c in reversed(frames):
+        if not hasattr(c, "_call_info"):
+            continue
+
+        if not hasattr(c._call_info[1], "_location_info"):
+            print(f'  in unknown')
+            print(end="".rjust(RJUST));_f_write(c._call_info[1]);print()
+            continue
+
+        filename, start_line, start_col, end_line, end_col = c._call_info[1]._location_info
+        if filename[:1] == "\x00":
+            filename = filename[1:]  # remove leading null
+            print(f'  in {filename!r}')
+            print(end="".rjust(RJUST));_f_write(c._call_info[1]);print()
+            continue
+
+        if filename not in _FILE_LINES_CACHE:
+            with open(filename) as _file: _text = _file.read()
+            _FILE_LINES_CACHE[filename] = _text.splitlines()
+        lines = _FILE_LINES_CACHE[filename]
+
+        if start_line == end_line:
+            # Single-line expression
+            print(f'  in {filename!r} at {start_line} [{start_col}:{end_col}]')
+            _line = lines[start_line-1]
+            print(end=(str(start_line)+"|").rjust(RJUST))
+            print(_line.expandtabs(4))
+            print(end=(" "*(1+len(str(start_line)))).rjust(RJUST))
+            _before = len(_line[:start_col-1].expandtabs(4))
+            print(end=" "*_before)
+            _after = len(_line[:end_col].expandtabs(4))
+            print(end="~"*(_after-_before))
+            print()
+
+        else:
+            # Multi-line expression
+            print(f'  in {filename!r} at {start_line}:{end_line} [{start_col}:{end_col}]')
+            for _line_no, _line in enumerate(lines[start_line-1:end_line], start=start_line):
+                if _line_no == start_line:
+                    _before = _line[:start_col-1].expandtabs(4)
+                    _line = "".join(". "[char==" "] for char in _before) + _line.expandtabs(4)[len(_before):]
+                elif _line_no == end_line:
+                    _line = _line[:end_col].expandtabs(4) + "".join(". "[char==" "] for char in _line[end_col:].expandtabs(4))
+                print(end=(str(_line_no).rjust(len(str(end_line)))+"|").rjust(RJUST))
+                print(_line.expandtabs(4))
 
 def main(env=None):
     import sys
@@ -778,11 +849,18 @@ def main(env=None):
     if type(env) is dict:
         env = Environment(env, Environment.ROOT)
     for expr in exprs:
-        continuation, value = Continuation(env, expr, Continuation.ROOT), None
+        continuation = Continuation(Environment.ROOT, _f_passthrough, Continuation.ROOT)
+        continuation._call_info = ["repl eval", expr]
+        continuation, value = Continuation(env, expr, continuation), None
         while continuation is not Continuation.ROOT:
             continuation, value = step_evaluate(continuation, value)
             if continuation is Continuation.ERROR:
-                print(end="! ");_f_write(Pair("error", value));print()
+                message = value
+                if type(message) is Pair and type(message.car) is Continuation:
+                    print("! --- stack trace ---")
+                    _f_print_trace(message.car)
+                    message = message.cdr
+                print(end="! ");_f_write(Pair("error", message));print()
                 exit(1)
         print(end="> ");_f_write(value);print()
 

@@ -3,27 +3,36 @@
 ($define! $cons (unwrap cons))
 ($define! list (wrap ($vau (_ args) args)))
 ($define! error
-	(wrap
-		($vau (dyn error-args)
-			(eval dyn
-				(cons (unwrap (continuation->applicative error-continuation)) error-args)))))
+	((wrap ($vau (_ $basic-vau)
+			(wrap ($vau (dyn error-args)
+				(call/cc
+					((car $basic-vau) (_ cc)
+						(eval dyn
+							(cons
+								(unwrap (continuation->applicative error-continuation))
+							(cons
+								(car cc)
+								error-args)))))))))
+		$vau))
 ($define! $sequence
 	((wrap ($vau (_ $seq2)
 			((car $seq2)
 				($define! $aux-sequence ($vau (env exprs)
 					($if (eq? (cdr exprs) ())
 						(eval env (car exprs))
-						((car $seq2)
-							(eval env (car exprs))
-							(eval env (cons $aux-sequence (cdr exprs)))))))
+						(eval env (list (car $seq2)
+							(car exprs)
+							(cons $aux-sequence (cdr exprs)))))))
 				($vau (env exprs)
 					($if (eq? exprs ())
 						#inert
 						(eval env (cons $aux-sequence exprs)))))))
 		((wrap ($vau (_ $basic-vau)
 				((car $basic-vau) (env a-b)
-					((wrap ((car $basic-vau) (_1 _2) (eval env (car (cdr a-b)))))
-						(eval env (car a-b))))))
+					(eval env (list
+						(wrap ((car $basic-vau) (_1 _2)
+							(eval env (car (cdr a-b)))))
+						(car a-b))))))
 			$vau)))
 ($define! $define!
 	(($vau (_1 _2) ($sequence
