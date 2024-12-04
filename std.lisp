@@ -74,11 +74,11 @@
 						(eval env (cons $sequence body))))))))))
 ($define! get-current-environment (wrap ($vau (env ()) env)))
 ($define! $lambda
-	($vau (static name-body)
+	($vau (static (name . body))
 		(wrap (eval static
 			(cons
 				$vau
 			(cons
-				(list #ignore (car name-body))
-				(cdr name-body)))))))
+				(list #ignore name)
+				body))))))
 ($define! make-standard-environment ($lambda () (get-current-environment)))
