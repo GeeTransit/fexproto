@@ -317,7 +317,7 @@ def _f_load(env, expr, *, parent=None):
     try:
         exprs = parse(tokens, filename=expr.decode("utf-8"))
     except ValueError as e:
-        return _f_error(parent, repr(e).encode("utf-8"))
+        return _f_error(parent, b"error while loading file", expr, repr(e).encode("utf-8"))
     args = ()
     for expr in reversed(exprs): args = Pair(expr, args)
     continuation = Continuation(env, None, parent)
