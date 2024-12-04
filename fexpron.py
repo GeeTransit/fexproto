@@ -141,11 +141,10 @@ def _f_write(obj):
         elif type(obj) is bytes:
             print(end='"')
             for char in obj:
-                i = b' ()"'.find(char)
-                if i == -1:
+                if char != b'"'[0]:
                     print(end=repr(bytes([char]))[2:-1])
                 else:
-                    print(end=(r"\x20", r"\x28", r"\x29", r'\"')[i])
+                    print(end=r'\"')
             print(end='"')
         elif type(obj) is Character:
             i = b" ()\t\n\r".find(obj.char)
