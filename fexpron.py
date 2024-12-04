@@ -99,6 +99,74 @@ def _f_copy_es(obj, *, seen=None, immutable=False):
     pair.immutable = immutable
     return pair
 
+def _f_write(obj):
+    seen = {}
+    def _recursive_write(obj, depth):
+        if type(obj) is tuple:
+            print(end="()")
+        elif type(obj) is Pair:
+            if id(obj) in seen:
+                seen_depth = seen[id(obj)]
+                print(end="#"+"."*(depth - seen_depth))
+            else:
+                start_depth = depth
+                remove = []
+                seen[id(obj)] = depth
+                remove.append(id(obj))
+                print(end="(")
+                _recursive_write(obj.car, depth+1)
+                depth += 1
+                obj = obj.cdr
+                while type(obj) is Pair:
+                    if id(obj) in seen:
+                        break
+                    seen[id(obj)] = depth
+                    remove.append(id(obj))
+                    print(end=" ")
+                    _recursive_write(obj.car, depth+1)
+                    depth += 1
+                    obj = obj.cdr
+                if type(obj) is not tuple:
+                    print(end=" . ")
+                    _recursive_write(obj, depth)
+                print(end=")")
+                for remove_obj in remove:
+                    del seen[remove_obj]
+        elif type(obj) in (int, float):
+            print(end=repr(obj))
+        elif type(obj) is str:
+            print(end=obj)
+        elif type(obj) is bytes:
+            print(end='"')
+            for char in obj:
+                i = b' ()"'.find(char)
+                if i == -1:
+                    print(end=repr(bytes([char]))[2:-1])
+                else:
+                    print(end=(r"\x20", r"\x28", r"\x29", r'\"')[i])
+            print(end='"')
+        elif type(obj) is Character:
+            i = b" ()\t\n\r".find(obj.char)
+            if i == -1:
+                out = repr(bytes([obj.char]))[2:-1]
+                if out[0] == "\\":
+                    print(end="#"+out)
+                else:
+                    print(end="#\\"+out)
+            else:
+                print(end=(r"#\x20", r"#\x28", r"#\x29", r"#\x09", r"#\x0a", r"#\x0d")[i])
+        elif type(obj) in (Environment, Continuation, Combiner):
+            print(end="#"+repr(obj))
+        elif type(obj) is type(...):
+            print(end="#ignore")
+        elif type(obj) is type(None):
+            print(end="#inert")
+        elif type(obj) is bool:
+            print(end="#t" if obj else "#f")
+        else:
+            print(end="#unknown"+repr(obj))
+    _recursive_write(obj, 0)
+
 # given a continuation and a value, get the next continuation and value
 def step_evaluate(continuation, value):
     env = continuation.env
@@ -653,7 +721,6 @@ def _make_standard_environment(*, primitives=None):
     return env
 
 def main(env=None):
-    import pprint
     import sys
     with open(sys.argv[1] if len(sys.argv) >= 2 else 0) as file:
         text = file.read()
@@ -671,8 +738,9 @@ def main(env=None):
         while continuation is not Continuation.ROOT:
             continuation, value = step_evaluate(continuation, value)
             if continuation is Continuation.ERROR:
-                exit(value)
-        pprint.pp(value)
+                print(end="! ");_f_write(Pair("error", value));print()
+                exit(1)
+        print(end="> ");_f_write(value);print()
 
 if __name__ == "__main__":
     main()
