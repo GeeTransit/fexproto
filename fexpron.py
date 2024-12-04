@@ -301,9 +301,13 @@ def _step_call_evcar(static, value, parent):
         continuation = Continuation(env, pending.car, continuation)
         return continuation, None
     else:
-        args = ()
-        while done != (): args, done = Pair(done.car, args), done.cdr
-        return parent, args
+        prev = ()
+        while done != ():
+            next_ = done.cdr
+            done.cdr = prev
+            prev = done
+            done = next_
+        return parent, prev
 
 # load a file in an environment
 def _f_load(env, expr, *, parent=None):
