@@ -877,6 +877,7 @@ def main(env=None):
                 else:
                     error_kind = "error"
                 if continuation is Continuation.ERROR:
+                    error_continuation = None
                     message = value
                     if type(message) is Pair and type(message.car) is Continuation:
                         print("! --- stack trace ---")
@@ -884,11 +885,14 @@ def main(env=None):
                         _f_print_trace(error_continuation)
                     print(end="! ");_f_write(Pair(error_kind, message));print()
                     if not len(sys.argv) >= 2:
+                        env.bindings["last-error-continuation"] = error_continuation
+                        env.bindings["last-error-message"] = message
                         break
                     exit(1)
             else:
                 if not len(sys.argv) >= 2:
                     print(end="> ");_f_write(value);print()
+                    env.bindings["last-value"] = value
 
 if __name__ == "__main__":
     main()
