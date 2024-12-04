@@ -47,7 +47,7 @@ temp2
 (char? #\a)
 (string? "abc")
 ''')
-exprs = fx.parse(tokens)
+exprs = fx.parse(tokens, filename="\x00test")
 env = fx._make_standard_environment()
 for expr, expected in zip(exprs, [7, 5, 10, "a", None, "a", None, "a", "c", 1, 0, True, True, True, fx.Pair(4, 6), None, fx.Pair(1, fx.Pair(2, fx.Pair(3, ()))), True, fx.Pair(1, ()), True, True, 2, True, b'abc', True, True, True, True, True, True, True]):
     actual = fx.f_eval(env, expr)

@@ -97,6 +97,8 @@ def _f_copy_es(obj, *, seen=None, immutable=False):
     pair.car = _f_copy_es(obj.car, seen=seen, immutable=immutable)
     pair.cdr = _f_copy_es(obj.cdr, seen=seen, immutable=immutable)
     pair.immutable = immutable
+    if immutable and hasattr(obj, "_location_info"):
+        pair._location_info = obj._location_info
     return pair
 
 def _f_write(obj):
@@ -298,7 +300,7 @@ def _f_load(env, expr, *, parent=None):
         text = file.read()
     tokens = tokenize(text)
     try:
-        exprs = parse(tokens)
+        exprs = parse(tokens, filename=expr.decode("utf-8"))
     except ValueError as e:
         return _f_error(parent, repr(e).encode("utf-8"))
     args = ()
@@ -524,174 +526,210 @@ _DEFAULT_ENV = {
 }
 
 def tokenize(text):
-    return text.replace("(", " ( ").replace(")", " ) ").split()
+    return text.encode("utf-8")
 
-def parse(tokens):
+def parse(tokens, filename="\x00parse"):
     exprs = []
-    expr_stack = []
-    pair_stack = []
-    field_stack = []
-    for token in tokens:
-        if token == "(":
-            # Update pair for new element
-            if expr_stack:
-                if field_stack[-1] is None:
-                    raise ValueError("unexpected element after cdr element")
-                if field_stack[-1] == "car":
-                    pair = Pair((), ())
-                    pair_stack.append(pair)
-                    if expr_stack[-1] > 0:
-                        pair_stack[-2].cdr = pair
-                    elif len(expr_stack) >= 2:
-                        if field_stack[-2] == "cdr":
-                            pair_stack[-2].cdr = pair
-                        else:
-                            pair_stack[-2].car = pair
-                    expr_stack[-1] += 1
-            expr_stack.append(0)
-            field_stack.append("car")
-        elif token == ")":
-            if not expr_stack:
-                raise ValueError("unmatched close bracket")
-            if field_stack[-1] == "cdr":
-                raise ValueError("unexpected close bracket after dot")
-            field_stack.pop()
-            expr = ()
-            for _ in range(expr_stack.pop()):
-                expr = pair_stack.pop()
-            # Update parent pair with list
-            if expr_stack:
-                if field_stack[-1] == "cdr":
-                    pair_stack[-1].cdr = expr
-                    field_stack[-1] = None
-                else:
-                    pair_stack[-1].car = expr
-            else:
-                exprs.append(expr)
-        elif token == ".":
-            if not expr_stack:
-                raise ValueError("unexpected dot outside of list")
-            if expr_stack[-1] == 0:
-                raise ValueError("unexpected dot as first element of list")
-            if field_stack[-1] == "cdr":
-                raise ValueError("unexpected dot after dot")
-            if field_stack[-1] is None:
-                raise ValueError("unexpected dot after cdr element")
-            field_stack[-1] = "cdr"
-        else:
-            # Update parent pair for new element
-            if expr_stack:
-                if field_stack[-1] is None:
-                    raise ValueError("unexpected element after cdr element")
-                if field_stack[-1] == "car":
-                    pair = Pair((), ())
-                    pair_stack.append(pair)
-                    if expr_stack[-1] > 0:
-                        pair_stack[-2].cdr = pair
-                    elif len(expr_stack) >= 2:
-                        if field_stack[-2] == "cdr":
-                            pair_stack[-2].cdr = pair
-                        else:
-                            pair_stack[-2].car = pair
-                    expr_stack[-1] += 1
-            # Parse token
-            if token[0] == '"':
-                string = bytearray()
-                i = 1
-                while i < len(token):
-                    char = token[i]
-                    if char == '"':
-                        if i != len(token) - 1:
-                            raise ValueError("unexpected end of string")
-                        break
-                    if char != "\\":
-                        string.extend(char.encode("utf-8"))
-                        i += 1
-                    else:
-                        if i + 1 >= len(token):
-                            raise ValueError("unexpected end of string in escape sequence")
-                        char = token[i + 1]
-                        if char in "\\'\"":
-                            string.append(ord(char))
-                            i += 2
-                        elif char in "abfnrtv":
-                            string.append(b"\a\b\f\n\r\t\v"["abfnrtv".index(char)])
-                            i += 2
-                        elif char == "x":
-                            if i + 4 > len(token):
-                                raise ValueError("unexpected end of string in escape sequence")
-                            if any(char not in "0123456789abcdef" for char in token[i+2:i+4].lower()):
-                                raise ValueError(f'invalid escape sequence: {token[i:i+4]}')
-                            char = sum(16**i * int(char, 16) for i, char in enumerate(token[i+2:i+4][::-1]))
-                            string.append(char)
-                            i += 4
-                        elif char == "u":
-                            if i + 6 > len(token):
-                                raise ValueError("unexpected end of string in escape sequence")
-                            if any(char not in "0123456789abcdef" for char in token[i+2:i+6].lower()):
-                                raise ValueError(f'invalid escape sequence: {token[i:i+6]}')
-                            char = sum(16**i * int(char, 16) for i, char in enumerate(token[i+2:i+6][::-1]))
-                            string.extend(chr(char).encode("utf-8"))
-                            i += 6
-                        elif char == "U":
-                            if i + 10 > len(token):
-                                raise ValueError("unexpected end of string in escape sequence")
-                            if any(char not in "0123456789abcdef" for char in token[i+2:i+10].lower()):
-                                raise ValueError(f'invalid escape sequence: {token[i:i+10]}')
-                            char = sum(16**i * int(char, 16) for i, char in enumerate(token[i+2:i+10][::-1]))
-                            string.extend(chr(char).encode("utf-8"))
-                            i += 10
-                        else:
-                            raise ValueError(f'invalid escape sequence: {token[i:i+2]}')
-                else:
-                    raise ValueError("unexpected end of string")
-                token = bytes(string)
-            elif token[:2] == "#.":
-                assert all(char == "." for char in token[1:]), "reference must only contain dots"
-                up = len(token) - 1
-                if up > len(pair_stack):
-                    raise ValueError("reference points outside of structure")
-                token = pair_stack[-up]
-            elif token[:2] == "#\\":
-                if token[2] == "x" and len(token) > 3:
-                    if len(token) != 5:
-                        raise ValueError(f'invalid character literal: {token}')
-                    if any(char not in "0123456789abcdef" for char in token[3:].lower()):
-                        raise ValueError(f'invalid character literal: {token}')
-                    char = sum(16**i * int(char, 16) for i, char in enumerate(token[3:][::-1]))
-                    token = Character(char)
-                else:
-                    if len(token) > 3:
-                        raise ValueError(f'invalid character literal: {token}')
-                    token = Character(ord(token[2]))
-            elif token == "#ignore":
-                token = ...
-            elif token == "#inert":
-                token = None
-            elif token in ("#t", "#f"):
-                token = token == "#t"
-            else:
-                try:
-                    token = float(token)
-                except ValueError:
-                    token = token.lower()
-                else:
-                    try:
-                        token = int(token)
-                    except ValueError:
-                        token = token.lower()
-            # Update parent pair with token
-            if expr_stack:
-                if field_stack[-1] == "cdr":
-                    pair_stack[-1].cdr = token
-                    field_stack[-1] = None
-                else:
-                    pair_stack[-1].car = token
-            else:
-                exprs.append(token)
-    if expr_stack:
-        raise ValueError(f'unclosed expression: {expr_stack}')
+    chars = (tokens[i:i+1] for i in range(len(tokens)+1))
+    reader = _Reader(lambda: next(chars), filename)
+    while True:
+        try:
+            expr = reader.read()
+        except EOFError:
+            break
+        expr = _f_copy_es(expr, immutable=True)
+        exprs.append(expr)
     return exprs
+
+class _Reader:
+    # get_next_char is a callable that returns a length 0 or 1 bytes object
+    def __init__(self, get_next_char, filename):
+        self.get_next_char = get_next_char
+        self.pos = 0
+        self.line_no = 1
+        self.char_no = 0
+        self._curr = None
+        self._cons = []
+        self.filename = filename
+
+    def read(self):
+        self._skip_whitespace()
+        if self.curr == b"":
+            raise EOFError("end of file reached")
+        return self._read()
+
+    # Returns the current value from get_next_char
+    @property
+    def curr(self):
+        if self._curr is None:
+            try:
+                self._curr = self.get_next_char()
+            except EOFError:
+                self._curr = b""
+            self.pos += 1
+            if self._curr == b"\n":
+                self.line_no += 1
+                self.char_no = 0
+            else:
+                self.char_no += 1
+        return self._curr
+
+    # Returns the next value from get_next_char
+    @property
+    def next(self):
+        if self._curr == b"":
+            raise ValueError("reading past end of file")
+        self._curr = None
+        return self.curr
+
+    def push_cons(self):
+        top = Pair((), ())
+        self._cons.append(top)
+        top._location_info = [self.filename, self.line_no, self.char_no, -1, -1]
+        return top
+
+    def pop_cons(self, same_as):
+        assert same_as is self._cons[-1]
+        top = self._cons.pop()
+        top._location_info[3:5] = self.line_no, self.char_no
+        return top
+
+    def _skip_whitespace(self):
+        while True:
+            if self.curr and self.curr in b" \t\r\n":
+                self.next
+            elif self.curr == b";":  # Comments take up the rest of the line
+                while self.curr and self.curr != b"\n":
+                    self.next
+            else:
+                break
+
+    def _read(self):
+        if self.curr == b'"':
+            return self._read_string()
+        elif self.curr == b"(":
+            start_info = self.line_no, self.char_no
+            self.next
+            self._skip_whitespace()
+            if self.curr == b")":
+                self.next
+                return ()
+            top = self._read_elements(True)
+            # Update debug info to start on the left bracket
+            top._location_info[1:3] = start_info
+            self._skip_whitespace()
+            if self.curr == b")":
+                self.next
+                return top
+            raise ValueError(f'expected close bracket, got {self.curr}')
+        elif self.curr == b")":
+            raise ValueError("unexpected close bracket")
+        elif self.curr == b" ":
+            self._skip_whitespace()
+            return self._read()
+        elif not self.curr:
+            raise ValueError(f'unexpected end of file')
+        else:
+            return self._read_literal()
+
+    def _read_elements(self, first):
+        if not first:
+            if self.curr == b")":
+                return ()
+            if self.curr == b".":
+                self.next
+                self._skip_whitespace()
+                return self._read()
+        top = self.push_cons()
+        top.car = self._read()
+        self._skip_whitespace()
+        top.cdr = self._read_elements(False)
+        return self.pop_cons(same_as=top)
+
+    def _read_string(self):
+        assert self.curr == b'"'
+        string_info = f'string starting at line {self.line_no} char {self.char_no}'
+        self.next
+        string = bytearray()
+        while self.curr != b'"':
+            if not self.curr:
+                raise ValueError(f'unexpected end of file in {string_info}')
+            if self.curr == b"\\":
+                self.next
+                if not self.curr:
+                    raise ValueError(f'unexpected end of escape sequence in {string_info}')
+                if self.curr in b"\\'\"":
+                    string.extend(self.curr)
+                    self.next
+                elif self.curr in b"abfnrtv":
+                    string.append(b"\a\b\f\n\r\t\v"[b"abfnrtv".index(self.curr)])
+                    self.next
+                elif self.curr in b"xuU":
+                    initial = self.curr
+                    self.next
+                    chars = bytearray()
+                    for _ in range((2, 4, 8)[b"xuU".index(initial)]):
+                        if not self.curr: raise ValueError(f'unexpected end of escape sequence in {string_info}')
+                        chars.extend(self.curr)
+                        self.next
+                    value = 0
+                    for char in chars:
+                        if char not in b"0123456789abcdefABCDEF":
+                            raise ValueError(f'invalid \\{initial.decode()} escape sequence in {string_info}: {chars}')
+                        value = value*16 + b"0123456789abcdef".index(bytes([char]).lower())
+                    if initial == b"x":
+                        string.append(value)
+                    else:
+                        string.extend(chr(value).encode("utf-8"))
+                else:
+                    raise ValueError(f'unknown escape sequence in {string_info}: {self.curr}')
+            else:
+                string.extend(self.curr)
+                self.next
+        self.next
+        return bytes(string)
+
+    def _read_literal(self):
+        const_info = f'literal starting at line {self.line_no} char {self.char_no}'
+        chars = bytearray()
+        while True:
+            chars.extend(self.curr)
+            self.next
+            if not self.curr or self.curr in b" \t\r\n();":
+                break
+        if chars[0] == b"#"[0]:  # constants
+            if chars == b"#t": return True
+            if chars == b"#f": return False
+            if chars == b"#inert": return None
+            if chars == b"#ignore": return ...
+            if len(chars) >= 2 and chars[1] == b"\\"[0]:
+                if len(chars) == 3:
+                    return Character(chars[2])
+                if len(chars) >= 3 and chars[2] == b"x"[0]:
+                    if len(chars) != 5:
+                        raise ValueError(f'invalid character {const_info}: {chars}')
+                    value = 0
+                    for char in chars[3:]:
+                        if char not in b"0123456789abcdefABCDEF":
+                            raise ValueError(f'invalid \\x escape sequence in character {const_info}: {chars}')
+                        value = value*16 + b"0123456789abcdef".index(bytes([char]).lower())
+                    return Character(value)
+                raise ValueError(f'invalid character {const_info}: {chars}')
+            if len(chars) >= 2 and chars[1] == b"."[0]:
+                if not all(char == b"."[0] for char in chars[1:]):
+                    raise ValueError(f'invalid self-reference {const_info}: {chars}')
+                if len(chars)-1 >= len(self._cons):
+                    raise ValueError(f'self-reference {const_info} references past the root element')
+                return self._cons[-(len(chars)-1)]
+            raise ValueError(f'unknown {const_info}: {chars}')
+        if chars[0] in b"0123456789" or chars[0] in b"-+" and len(chars) >= 2 and chars[1] in b"0123456789":
+            chars = chars.decode("latin1")
+            try:
+                return int(chars)
+            except ValueError:
+                return float(chars)
+        return chars.decode("utf-8").lower()  # Symbols are lowercase
+
 
 # make a standard environment (should be constant)
 def _make_standard_environment(*, primitives=None):
@@ -706,7 +744,7 @@ def _make_standard_environment(*, primitives=None):
     with open("std.lisp") as file:
         text = file.read()
     tokens = tokenize(text)
-    exprs = parse(tokens)
+    exprs = parse(tokens, filename="std.lisp")
 
     # evaluate in standard environment
     for expr in exprs:
@@ -726,7 +764,7 @@ def main(env=None):
         text = file.read()
     tokens = tokenize(text)
     try:
-        exprs = parse(tokens)
+        exprs = parse(tokens, filename=sys.argv[1] if len(sys.argv) >= 2 else "\x00stdin")
     except ValueError as e:
         exit(e)
     if env is None:
