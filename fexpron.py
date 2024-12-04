@@ -186,6 +186,7 @@ def step_evaluate(continuation, value):
         # evaluate car of call
         next_env = Environment({"env": env, "args": args}, Environment.ROOT)
         continuation = Continuation(next_env, _step_call_wrapped, parent)
+        continuation = Continuation(Environment.ROOT, _step_call_combcar, continuation)
         continuation = Continuation(env, name, continuation)
         return continuation, None
     elif type(expr) in (int, float, Combiner, bytes, type(...), bool, type(None), Continuation, Environment, tuple, Character):
@@ -240,10 +241,16 @@ def _step_encycle(env, args, parent):
     args.cdr = head
     return parent, args
 
+def _step_call_combcar(_env, value, parent):
+    if type(value) is not Combiner:
+        return _f_error(parent, b"expected combiner as car of combiner call, got: ", value)
+    return parent, value
+
 # evaluate arguments based on num_wraps
 def _step_call_wrapped(static, combiner, parent):
     env = static.bindings["env"]
     args = static.bindings["args"]
+    assert type(combiner) is Combiner
     continuation = Continuation(env, combiner.func, parent)
     if combiner.num_wraps == 0:
         return continuation, args
