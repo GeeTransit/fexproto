@@ -231,18 +231,16 @@ def _get_list_metrics(obj):
     return offset + hare_distance, 0, offset, hare_distance
 
 # if c is nonzero, set the a+c-1th pair's cdr to the ath pair
-def _step_encycle(env, args, parent):
-    a = env.bindings["a"]
-    c = env.bindings["c"]
+def _encycle(a, c, args):
     if c == 0:
-        return parent, args
+        return args
     for _ in range(a):
         args = args.cdr
     head = args
     for _ in range(c - 1):
         args = args.cdr
     args.cdr = head
-    return parent, args
+    return args
 
 def _step_call_combcar(_env, value, parent):
     if type(value) is not Combiner:
@@ -254,59 +252,67 @@ def _step_call_wrapped(static, combiner, parent):
     env = static.bindings["env"]
     args = static.bindings["args"]
     assert type(combiner) is Combiner
-    continuation = Continuation(env, combiner.func, parent)
-    if combiner.num_wraps == 0:
+    if combiner.num_wraps == 0 or args == ():
+        continuation = Continuation(env, combiner.func, parent)
         return continuation, args
     p, n, a, c = _get_list_metrics(args)
     if n == c == 0:
         return _f_error(parent, b"applicative arguments must be proper list, got: ", args)
-    encycle_env = Environment({"a": a, "c": c}, Environment.ROOT)
-    continuation = Continuation(encycle_env, _step_encycle, continuation)
-    next_env = Environment({"env": env, "num_wraps": combiner.num_wraps, "p": p}, Environment.ROOT)
-    continuation = Continuation(next_env, _step_call_evlis, continuation)
-    return continuation, args
-
-# evaluate each element in the list
-def _step_call_evlis(static, args, parent):
-    num_wraps = static.bindings["num_wraps"]
-    env = static.bindings["env"]
-    p = static.bindings["p"]
-    if num_wraps > 0:
-        next_env = Environment({"env": env, "num_wraps": num_wraps - 1, "p": p}, Environment.ROOT)
-        continuation = Continuation(next_env, _step_call_evlis, parent)
-        evcar_env = Environment({"env": env, "p": p, "pending": args, "done": (), "started": False}, Environment.ROOT)
-        continuation = Continuation(evcar_env, _step_call_evcar, continuation)
-        return continuation, None
-    else:
-        return parent, args
+    # Create isomorphic list of args
+    copy_args = last_arg = Pair((), ())
+    curr_arg = args
+    for _ in range(p):
+        last_arg.cdr = Pair(curr_arg.car, ())
+        last_arg = last_arg.cdr
+        curr_arg = curr_arg.cdr
+    copy_args = _encycle(a, c, copy_args.cdr)
+    # Create list for order of argument evaluation
+    eval_args = last_arg = Pair((), ())
+    curr_arg = copy_args
+    for _ in range(p):
+        last_arg.cdr = Pair(curr_arg, ())
+        last_arg = last_arg.cdr
+        curr_arg = curr_arg.cdr
+    eval_args = eval_args.cdr
+    # Setup and run _step_call_evcar on each argument
+    next_env = Environment({
+        "env": env,
+        "combiner": combiner,
+        "args": copy_args,
+        "num_wraps": combiner.num_wraps,
+        "p": p,
+        "i": 0,
+        "eval_args": eval_args,
+        "eval_arg": eval_args,
+    }, Environment.ROOT)
+    continuation = Continuation(next_env, _step_call_evcar, parent)
+    continuation._call_info = ["eval combiner arg", eval_args.car.car]
+    continuation = Continuation(env, eval_args.car.car, continuation)
+    return continuation, None
 
 def _step_call_evcar(static, value, parent):
     env = static.bindings["env"]
+    num_wraps = static.bindings["num_wraps"]
     p = static.bindings["p"]
-    pending = static.bindings["pending"]
-    done = static.bindings["done"]
-    started = static.bindings["started"]
-    if started:
-        done = Pair(value, done)
-    else:
-        static.bindings["started"] = True
-    if p > 0:
-        # append the previous result and evaluate the next element
-        static.bindings["p"] -= 1
-        static.bindings["pending"] = pending.cdr
-        static.bindings["done"] = done
-        continuation = Continuation(static, _step_call_evcar, parent)
-        continuation._call_info = ["eval combiner arg", pending.car]
-        continuation = Continuation(env, pending.car, continuation)
-        return continuation, None
-    else:
-        prev = ()
-        while done != ():
-            next_ = done.cdr
-            done.cdr = prev
-            prev = done
-            done = next_
-        return parent, prev
+    i = static.bindings["i"]
+    eval_arg = static.bindings["eval_arg"]
+    eval_arg.car.car = value
+    i += 1
+    eval_arg = eval_arg.cdr
+    if i == p:
+        i = 0
+        num_wraps -= 1
+        eval_arg = static.bindings["eval_args"]
+        if num_wraps == 0:
+            continuation = Continuation(env, static.bindings["combiner"].func, parent)
+            return continuation, static.bindings["args"]
+        static.bindings["num_wraps"] = num_wraps
+    static.bindings["i"] = i
+    static.bindings["eval_arg"] = eval_arg
+    continuation = Continuation(static, _step_call_evcar, parent)
+    continuation._call_info = ["eval combiner arg", eval_arg.car.car]
+    continuation = Continuation(env, eval_arg.car.car, continuation)
+    return continuation, None
 
 # modify environment according to name
 def _f_define(static, expr, parent):
