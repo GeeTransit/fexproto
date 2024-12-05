@@ -171,6 +171,7 @@ def _f_write(obj):
             print(end="#unknown"+repr(obj))
     _recursive_write(obj, 0)
 
+_FUNCTION_TYPE = type(lambda: None)
 # given a continuation and a value, get the next continuation and value
 def step_evaluate(continuation, value):
     env = continuation.env
@@ -193,12 +194,10 @@ def step_evaluate(continuation, value):
         continuation._call_info = ["eval combiner car", expr.car]  # non-tail call
         continuation = Continuation(env, name, continuation)
         return continuation, None
-    elif type(expr) in (int, float, Combiner, bytes, type(...), bool, type(None), Continuation, Environment, tuple, Character):
+    elif type(expr) is not _FUNCTION_TYPE and type(expr) is not Operative:
         return parent, expr
-    elif callable(expr):
-        return expr(env, value, parent=parent)
     else:
-        return _f_error(parent, b"unknown expression type: ", expr)
+        return expr(env, value, parent=parent)
 
 # return (number of Pairs, number of Nils, Acyclic prefix length, Cycle length)
 def _get_list_metrics(obj):
