@@ -332,6 +332,17 @@ def _f_abnormal_pass(env, _value, parent):
 def _f_passthrough(_env, value, parent):  # Useful for root REPL continuations
     return parent, value
 
+def _f_sequence_inert(env, expr, parent):
+    seq_env = env.bindings["env"]
+    seq_exprs = env.bindings["exprs"]
+    if seq_exprs == ():
+        return parent, None
+    next_env = Environment({"env": seq_env, "exprs": seq_exprs.cdr}, Environment.ROOT)
+    continuation = Continuation(next_env, _f_sequence_inert, parent)
+    continuation._call_info = ["eval sequence inert", seq_exprs.car]  # non-tail call
+    continuation = Continuation(seq_env, seq_exprs.car, continuation)
+    return continuation, None
+
 def _operative_number(env, expr, parent):
     return parent, type(expr.car) in (int, float)
 
@@ -412,10 +423,9 @@ def _operative_load(env, expr, parent):
         return _f_error(parent, b"error while loading file", filename, repr(e).encode("utf-8"))
     args = ()
     for expr in reversed(exprs): args = Pair(expr, args)
-    continuation = Continuation(env, None, parent)
-    next_env = Environment({"env": env, "num_wraps": 1, "p": len(exprs)}, Environment.ROOT)
-    continuation = Continuation(next_env, _step_call_evlis, continuation)
-    return continuation, args
+    next_env = Environment({"env": env, "exprs": args}, Environment.ROOT)
+    continuation = Continuation(next_env, _f_sequence_inert, parent)
+    return continuation, None
 
 def _operative_if(env, expr, parent):
     next_env = Environment({"env": env, "on_true": expr.cdr.car, "on_false": expr.cdr.cdr.car}, Environment.ROOT)
