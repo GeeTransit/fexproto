@@ -341,8 +341,67 @@ def _f_if(env, result, parent):
         return Continuation(env, on_false, parent), None
     return _f_error(parent, b"expected #t or #f as condition for $if, got: ", result)
 
+def _f_force_normal_pass(env, value, parent):
+    return env.bindings["continuation"], value
+
 def _f_abnormal_pass(env, _value, parent):
-    return env.parent.bindings["continuation"], env.bindings["value"]
+    source = parent
+    destination = env.parent.bindings["continuation"]
+    def _get_continuation_depth(cont):
+        depth = 0
+        while cont is not Continuation.ROOT:
+            cont = cont.parent
+            depth += 1
+        return depth
+    def _continuation_contains(parent, child):
+        while child is not Continuation.ROOT:
+            if child is parent:
+                return True
+            child = child.parent
+        return child is parent
+    def _apply_interceptor(env, value, parent):
+        outer = env.bindings["outer"]
+        _, divert = _operative_continuation_to_applicative(Environment.ROOT, Pair(outer, ()), parent)
+        return Continuation(Environment({}, Environment.ROOT), env.bindings["interceptor"].func, parent), Pair(value, Pair(divert, ()))
+    # Get depth of source and destination continuation
+    source_depth = _get_continuation_depth(source)
+    destination_depth = _get_continuation_depth(destination)
+    # Move up on both source and destination until a common ancestor is found
+    source_curr = source
+    destination_curr = destination
+    exit_interceptors = []
+    entry_interceptors = []
+    while source_curr is not destination_curr:
+        if source_depth > destination_depth:
+            # Check exit guards
+            if hasattr(source_curr, "exit_guards"):
+                for selector, interceptor in source_curr.exit_guards:
+                    if _continuation_contains(selector, destination):
+                        exit_interceptors.append((source_curr, interceptor))
+                        break
+            source_curr = source_curr.parent
+            source_depth -= 1
+        else:
+            # Check entry guards
+            if hasattr(destination_curr, "entry_guards"):
+                for selector, interceptor in destination_curr.entry_guards:
+                    if _continuation_contains(selector, source):
+                        entry_interceptors.append((destination_curr, interceptor))
+                        break
+            destination_curr = destination_curr.parent
+            destination_depth -= 1
+    # Setup interceptor chain
+    next_cont = destination
+    continuation = destination
+    for cont, interceptor in entry_interceptors:
+        continuation = Continuation(Environment({"continuation": next_cont}, Environment.ROOT), _f_force_normal_pass, cont)
+        continuation = Continuation(Environment({"interceptor": interceptor, "outer": cont}, Environment.ROOT), _apply_interceptor, continuation)
+        next_cont = cont
+    for cont, interceptor in exit_interceptors:
+        continuation = Continuation(Environment({"continuation": next_cont}, Environment.ROOT), _f_force_normal_pass, cont.parent)
+        continuation = Continuation(Environment({"interceptor": interceptor, "outer": cont.parent}, Environment.ROOT), _apply_interceptor, continuation)
+        next_cont = cont.parent
+    return continuation, env.bindings["value"]
 
 def _f_passthrough(_env, value, parent):  # Useful for root REPL continuations
     return parent, value
@@ -493,6 +552,36 @@ def _operative_extend_continuation(env, expr, parent):
     new_continuation = Continuation(environment, applicative.func, continuation)
     return parent, new_continuation
 
+def _operative_guard_continuation(env, expr, parent):
+    entry_guards = expr.car
+    continuation = expr.cdr.car
+    exit_guards = expr.cdr.cdr.car
+    outer = Continuation(Environment.ROOT, _f_passthrough, continuation)
+    outer.entry_guards = []
+    inner = Continuation(Environment.ROOT, _f_passthrough, outer)
+    inner.exit_guards = []
+    for _ in range(_get_list_metrics(entry_guards)[0]):
+        selector, interceptor = entry_guards.car.car, entry_guards.car.cdr.car
+        if type(selector) is not Continuation:
+            return _f_error(parent, b"selector must be a continuation")
+        if type(interceptor) is not Combiner:
+            return _f_error(parent, b"interceptor must be a applicative")
+        if interceptor.num_wraps != 1:
+            return _f_error(parent, b"interceptor unwrapped must be an operative")
+        outer.entry_guards.append((selector, interceptor))
+        entry_guards = entry_guards.cdr
+    for _ in range(_get_list_metrics(exit_guards)[0]):
+        selector, interceptor = exit_guards.car.car, exit_guards.car.cdr.car
+        if type(selector) is not Continuation:
+            return _f_error(parent, b"selector must be a continuation")
+        if type(interceptor) is not Combiner:
+            return _f_error(parent, b"interceptor must be a applicative")
+        if interceptor.num_wraps != 1:
+            return _f_error(parent, b"interceptor unwrapped must be an operative")
+        inner.exit_guards.append((selector, interceptor))
+        exit_guards = exit_guards.cdr
+    return parent, inner
+
 def _operative_char(env, expr, parent):
     return parent, type(expr.car) is Character
 
@@ -561,6 +650,7 @@ _DEFAULT_ENV = {
     "continuation->applicative": Combiner(1, _operative_continuation_to_applicative),
     "call/cc": Combiner(1, _operative_call_cc),
     "extend-continuation": Combiner(1, _operative_extend_continuation),
+    "guard-continuation": Combiner(1, _operative_guard_continuation),
     "error-continuation": Continuation.ERROR,
     "root-continuation": Continuation.ROOT,
     "char?": Combiner(1, _operative_char),
