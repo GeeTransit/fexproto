@@ -160,3 +160,22 @@
 					(apply append (cons
 						(cdr (car args))
 						(cdr args))))))))
+($define! $binds?
+	($vau (dyn (env-expr . names))
+		($define! env (eval dyn env-expr))
+		(call/cc ($lambda (cc)
+			($define! inner
+				(guard-continuation
+					()
+					cc
+					(list
+						(list
+							error-continuation
+							($lambda (#ignore divert)
+								(apply divert #f))))))
+			($define! check
+				(extend-continuation inner
+					($lambda ()
+						(eval env (cons list names))
+						#t)))
+			((continuation->applicative check))))))
