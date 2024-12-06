@@ -274,6 +274,15 @@ def _step_call_wrapped(static, combiner, parent):
         last_arg = last_arg.cdr
         curr_arg = curr_arg.cdr
     eval_args = eval_args.cdr
+    # Shuffle args to ensure correctness
+    if p > 1:
+        shuffle_args = []
+        while eval_args != ():
+            shuffle_args.append(eval_args.car)
+            eval_args = eval_args.cdr
+        import random; random.shuffle(shuffle_args)
+        while shuffle_args:
+            eval_args = Pair(shuffle_args.pop(), eval_args)
     # Setup and run _step_call_evcar on each argument
     next_env = Environment({
         "env": env,
