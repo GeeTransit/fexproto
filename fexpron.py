@@ -64,6 +64,11 @@ class Character:
             and self.char == other.char
         )
 
+class Encapsulation:
+    def __init__(self, obj, arg):
+        self.obj = obj
+        self.arg = arg
+
 def f_eval(env, expr):
     if type(env) is dict:
         env = Environment(env, Environment.ROOT)
@@ -159,7 +164,7 @@ def _f_write(obj):
                     print(end="#\\"+out)
             else:
                 print(end=(r"#\x20", r"#\x28", r"#\x29", r"#\x09", r"#\x0a", r"#\x0d")[i])
-        elif type(obj) in (Environment, Continuation, Combiner):
+        elif type(obj) in (Environment, Continuation, Combiner, Encapsulation):
             print(end="#"+repr(obj))
         elif type(obj) is type(...):
             print(end="#ignore")
@@ -403,6 +408,23 @@ def _f_abnormal_pass(env, _value, parent):
         next_cont = cont.parent
     return continuation, env.bindings["value"]
 
+def _f_encapsulate(env, _value, parent):
+    encap_arg = env.bindings["value"].car
+    encap_obj = env.parent.bindings["encap_obj"]
+    return parent, Encapsulation(encap_obj, encap_arg)
+
+def _f_check_encapsulation(env, _value, parent):
+    encap = env.bindings["value"].car
+    encap_obj = env.parent.bindings["encap_obj"]
+    return parent, type(encap) is Encapsulation and encap.obj is encap_obj
+
+def _f_decapsulate(env, _value, parent):
+    encap = env.bindings["value"].car
+    encap_obj = env.parent.bindings["encap_obj"]
+    if type(encap) is not Encapsulation or encap.obj is not encap_obj:
+        return _f_error(parent, b"cannot decapsulate object", encap)
+    return parent, encap.arg
+
 def _f_passthrough(_env, value, parent):  # Useful for root REPL continuations
     return parent, value
 
@@ -582,6 +604,14 @@ def _operative_guard_continuation(env, expr, parent):
         exit_guards = exit_guards.cdr
     return parent, inner
 
+def _operative_make_encapsulation_type(env, expr, parent):
+    encap_obj = object()
+    encap_env = Environment({"encap_obj": encap_obj}, Environment.ROOT)
+    encapsulator = Combiner(1, Operative(encap_env, "_", "value", _f_encapsulate))
+    predicate = Combiner(1, Operative(encap_env, "_", "value", _f_check_encapsulation))
+    decapsulator = Combiner(1, Operative(encap_env, "_", "value", _f_decapsulate))
+    return parent, Pair(encapsulator, Pair(predicate, Pair(decapsulator, ())))
+
 def _operative_char(env, expr, parent):
     return parent, type(expr.car) is Character
 
@@ -653,6 +683,7 @@ _DEFAULT_ENV = {
     "guard-continuation": Combiner(1, _operative_guard_continuation),
     "error-continuation": Continuation.ERROR,
     "root-continuation": Continuation.ROOT,
+    "make-encapsulation-type": Combiner(1, _operative_make_encapsulation_type),
     "char?": Combiner(1, _operative_char),
     "read-char": Combiner(1, _operative_read_char),
     "write-char": Combiner(1, _operative_write_char),
