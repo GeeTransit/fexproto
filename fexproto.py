@@ -1065,7 +1065,7 @@ def main(env=None, argv=None):
 
     interactive = (len(argv) == 1)
 
-    with open(argv[1] if not interactive else 0, mode="rb") as file:
+    with open(argv[1] if not interactive and argv[1] != "-" else 0, mode="rb") as file:
         reader = _Reader(lambda: file.read(1), argv[1] if not interactive else "\x00stdin")
         if interactive:
             print(f'? --- interactive repl ---')
