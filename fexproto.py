@@ -1006,20 +1006,30 @@ def _f_print_trace(c):
             continue
 
         filename, start_line, start_col, end_line, end_col = c._call_info[1]._location_info
+        if filename not in _FILE_LINES_CACHE:
+            _FILE_LINES_CACHE[filename] = None
+            if filename[:1] != "\x00":
+                try:
+                    with open(filename) as _file: _text = _file.read()
+                    _FILE_LINES_CACHE[filename] = _text.splitlines()
+                except FileNotFoundError:
+                    pass
+        lines = _FILE_LINES_CACHE.get(filename)
+
         if filename[:1] == "\x00":
             filename = filename[1:]  # remove leading null
-            print(f'  in {filename!r}')
+
+        if start_line == end_line:
+            print(f'  in {filename!r} at {start_line} [{start_col}:{end_col}]')
+        else:
+            print(f'  in {filename!r} at {start_line}:{end_line} [{start_col}:{end_col}]')
+
+        if lines is None:
             print(end="".rjust(RJUST));_f_write(c._call_info[1]);print()
             continue
 
-        if filename not in _FILE_LINES_CACHE:
-            with open(filename) as _file: _text = _file.read()
-            _FILE_LINES_CACHE[filename] = _text.splitlines()
-        lines = _FILE_LINES_CACHE[filename]
-
         if start_line == end_line:
             # Single-line expression
-            print(f'  in {filename!r} at {start_line} [{start_col}:{end_col}]')
             _line = lines[start_line-1]
             print(end=(str(start_line)+"|").rjust(RJUST))
             print(_line.expandtabs(4))
@@ -1032,7 +1042,6 @@ def _f_print_trace(c):
 
         else:
             # Multi-line expression
-            print(f'  in {filename!r} at {start_line}:{end_line} [{start_col}:{end_col}]')
             for _line_no, _line in enumerate(lines[start_line-1:end_line], start=start_line):
                 if _line_no == start_line:
                     _before = _line[:start_col-1].expandtabs(4)
@@ -1067,7 +1076,6 @@ def main(env=None):
                     reader.next
                 if reader.curr == b"":
                     break
-                reader = _Reader(lambda: file.read(1), sys.argv[1] if len(sys.argv) >= 2 else "\x00stdin")
                 continue
             expr = _f_copy_es(expr, immutable=True)
 
