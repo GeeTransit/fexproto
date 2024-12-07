@@ -425,6 +425,28 @@ def _f_decapsulate(env, _value, parent):
         return _f_error(parent, b"cannot decapsulate object", encap)
     return parent, encap.arg
 
+def _f_dynamic_binder(env, _value, parent):
+    value = env.bindings["value"].car
+    combiner = env.bindings["value"].cdr.car
+    dynamic_obj = env.parent.bindings["dynamic_obj"]
+    if type(combiner) is not Combiner:
+        return _f_error(parent, b"second argument must be a combiner", combiner)
+    continuation = Continuation(Environment.ROOT, _f_passthrough, parent)
+    continuation.dynamic_variables = {dynamic_obj: value}
+    continuation = Continuation(Environment({}, Environment.ROOT), combiner.func, continuation)
+    return continuation, ()
+
+def _f_dynamic_accessor(env, _value, parent):
+    dynamic_obj = env.parent.bindings["dynamic_obj"]
+    continuation = parent
+    while continuation is not Continuation.ROOT:
+        if hasattr(continuation, "dynamic_variables"):
+            for key, value in continuation.dynamic_variables.items():
+                if key is dynamic_obj:
+                    return parent, value
+        continuation = continuation.parent
+    return _f_error(parent, b"no dynamic binding found")
+
 def _f_passthrough(_env, value, parent):  # Useful for root REPL continuations
     return parent, value
 
@@ -612,6 +634,13 @@ def _operative_make_encapsulation_type(env, expr, parent):
     decapsulator = Combiner(1, Operative(encap_env, "_", "value", _f_decapsulate))
     return parent, Pair(encapsulator, Pair(predicate, Pair(decapsulator, ())))
 
+def _operative_make_keyed_dynamic_variable(env, expr, parent):
+    dynamic_obj = object()
+    dynamic_env = Environment({"dynamic_obj": dynamic_obj}, Environment.ROOT)
+    binder = Combiner(1, Operative(dynamic_env, "_", "value", _f_dynamic_binder))
+    accessor = Combiner(1, Operative(dynamic_env, "_", "value", _f_dynamic_accessor))
+    return parent, Pair(binder, Pair(accessor, ()))
+
 def _operative_char(env, expr, parent):
     return parent, type(expr.car) is Character
 
@@ -684,6 +713,7 @@ _DEFAULT_ENV = {
     "error-continuation": Continuation.ERROR,
     "root-continuation": Continuation.ROOT,
     "make-encapsulation-type": Combiner(1, _operative_make_encapsulation_type),
+    "make-keyed-dynamic-variable": Combiner(1, _operative_make_keyed_dynamic_variable),
     "char?": Combiner(1, _operative_char),
     "read-char": Combiner(1, _operative_read_char),
     "write-char": Combiner(1, _operative_write_char),
