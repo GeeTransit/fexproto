@@ -88,6 +88,23 @@
 		($if (eval env cond)
 			(eval env (cons $sequence exprs))
 			(eval env (cons $cond rest)))))
+($define! not? ($lambda (bool) ($if bool #f #t)))
+($define! $and? ($vau (env args)
+	($cond
+		((null? args) #t)
+		((null? (cdr args)) (eval env (car args)))
+		(#t
+			(eval env (list $if (car args)
+				(cons $and? (cdr args))
+				#f))))))
+($define! $or? ($vau (env args)
+	($cond
+		((null? args) #f)
+		((null? (cdr args)) (eval env (car args)))
+		(#t
+			(eval env (list $if (car args)
+				#t
+				(cons $or? (cdr args))))))))
 ($define! apply
 	($lambda (func args . env)
 		(eval
