@@ -49,10 +49,24 @@ temp2
 (eval (make-standard-environment) (list $sequence (list load "test_fexpron.lisp") ((unwrap list) . variable) 1))
 (eq? #t ($binds? (get-current-environment) car))
 (eq? #f ($binds? (get-current-environment) racecar))
+(($lambda ()
+    ($define! $and? ($vau (dyn args)
+        ($cond
+            ((null? args) #t)
+            ((eval dyn (car args))
+                (apply (wrap $and?) (cdr args) dyn))
+            (#t #f))))
+    ($define! (e1 p1? d1) (make-encapsulation-type))
+    ($define! (e2 p2? d2) (make-encapsulation-type))
+    ($define! obj1 (e1 make-encapsulation-type))
+    ($and?
+        (p1? obj1)
+        (eq? #f (p2? obj1))
+        (eq? (d1 obj1) make-encapsulation-type))))
 ''')
 exprs = fx.parse(tokens, filename="\x00test")
 env = fx._make_standard_environment()
-for expr, expected in zip(exprs, [7, 5, 10, "a", None, "a", None, "a", "c", 1, 0, True, True, True, fx.Pair(4, 6), None, fx.Pair(1, fx.Pair(2, fx.Pair(3, ()))), True, fx.Pair(1, ()), True, True, 2, True, b'abc', True, True, True, True, True, True, True, 1, True, True]):
+for expr, expected in zip(exprs, [7, 5, 10, "a", None, "a", None, "a", "c", 1, 0, True, True, True, fx.Pair(4, 6), None, fx.Pair(1, fx.Pair(2, fx.Pair(3, ()))), True, fx.Pair(1, ()), True, True, 2, True, b'abc', True, True, True, True, True, True, True, 1, True, True, True]):
     actual = fx.f_eval(env, expr)
     if expected is ...:
         continue
