@@ -447,6 +447,27 @@ def _f_dynamic_accessor(env, _value, parent):
         continuation = continuation.parent
     return _f_error(parent, b"no dynamic binding found")
 
+def _f_static_binder(env, _value, parent):
+    value = env.bindings["value"].car
+    environment = env.bindings["value"].cdr.car
+    static_obj = env.parent.bindings["static_obj"]
+    if type(environment) is not Environment:
+        return _f_error(parent, b"second argument must be an environment", environment)
+    environment = Environment({}, environment)
+    environment.static_variables = {static_obj: value}
+    return parent, environment
+
+def _f_static_accessor(env, _value, parent):
+    static_obj = env.parent.bindings["static_obj"]
+    environment = env.bindings["dyn"]
+    while environment is not Environment.ROOT:
+        if hasattr(environment, "static_variables"):
+            for key, value in environment.static_variables.items():
+                if key is static_obj:
+                    return parent, value
+        environment = environment.parent
+    return _f_error(parent, b"no static binding found")
+
 def _f_passthrough(_env, value, parent):  # Useful for root REPL continuations
     return parent, value
 
@@ -641,6 +662,13 @@ def _operative_make_keyed_dynamic_variable(env, expr, parent):
     accessor = Combiner(1, Operative(dynamic_env, "_", "value", _f_dynamic_accessor))
     return parent, Pair(binder, Pair(accessor, ()))
 
+def _operative_make_keyed_static_variable(env, expr, parent):
+    static_obj = object()
+    static_env = Environment({"static_obj": static_obj}, Environment.ROOT)
+    binder = Combiner(1, Operative(static_env, "_", "value", _f_static_binder))
+    accessor = Combiner(1, Operative(static_env, "dyn", "value", _f_static_accessor))
+    return parent, Pair(binder, Pair(accessor, ()))
+
 def _operative_char(env, expr, parent):
     return parent, type(expr.car) is Character
 
@@ -714,6 +742,7 @@ _DEFAULT_ENV = {
     "root-continuation": Continuation.ROOT,
     "make-encapsulation-type": Combiner(1, _operative_make_encapsulation_type),
     "make-keyed-dynamic-variable": Combiner(1, _operative_make_keyed_dynamic_variable),
+    "make-keyed-static-variable": Combiner(1, _operative_make_keyed_static_variable),
     "char?": Combiner(1, _operative_char),
     "read-char": Combiner(1, _operative_read_char),
     "write-char": Combiner(1, _operative_write_char),
