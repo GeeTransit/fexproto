@@ -605,8 +605,8 @@ def _operative_call_cc(env, expr, parent):
     combiner = expr.car
     if type(combiner) is not Combiner:
         return _f_error(parent, b"argument must be type Combiner, got: ", combiner)
-    continuation = Continuation(env, Pair(combiner, Pair(parent, ())), parent)
-    return continuation, None
+    continuation = Continuation(env, combiner.func, parent)
+    return continuation, Pair(parent, ())
 
 def _operative_extend_continuation(env, expr, parent):
     continuation = expr.car
