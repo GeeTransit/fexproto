@@ -1062,6 +1062,10 @@ def main(env=None):
 
     with open(sys.argv[1] if len(sys.argv) >= 2 else 0, mode="rb") as file:
         reader = _Reader(lambda: file.read(1), sys.argv[1] if len(sys.argv) >= 2 else "\x00stdin")
+        if not len(sys.argv) >= 2:
+            print(f'? --- interactive repl ---')
+            print(f'? results are prefixed with > and errors with !')
+            print(f'? try typing (($lambda (a b) (+ a b)) 1 2)')
         while True:
             try:
                 expr = reader.read()
