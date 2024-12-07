@@ -1051,18 +1051,21 @@ def _f_print_trace(c):
                 print(end=(str(_line_no).rjust(len(str(end_line)))+"|").rjust(RJUST))
                 print(_line.expandtabs(4))
 
-def main(env=None):
+def main(env=None, argv=None):
     import sys
     if env is None:
         env = _make_standard_environment()
     if type(env) is dict:
         env = Environment(env, Environment.ROOT)
+    if argv is None:
+        argv = list(sys.argv)
+
     # Fake continuation to represent the interpreter
     main_continuation = Continuation(Environment.ROOT, _f_passthrough, Continuation.ROOT)
 
-    with open(sys.argv[1] if len(sys.argv) >= 2 else 0, mode="rb") as file:
-        reader = _Reader(lambda: file.read(1), sys.argv[1] if len(sys.argv) >= 2 else "\x00stdin")
-        if not len(sys.argv) >= 2:
+    with open(argv[1] if len(argv) >= 2 else 0, mode="rb") as file:
+        reader = _Reader(lambda: file.read(1), argv[1] if len(argv) >= 2 else "\x00stdin")
+        if not len(argv) >= 2:
             print(f'? --- interactive repl ---')
             print(f'? results are prefixed with > and errors with !')
             print(f'? try typing (($lambda (a b) (+ a b)) 1 2)')
@@ -1072,7 +1075,7 @@ def main(env=None):
             except EOFError:
                 break
             except ValueError as e:
-                if len(sys.argv) >= 2:
+                if len(argv) >= 2:
                     raise
                 _syntax_error = Pair(type(e).__name__.encode("utf-8"), Pair(", ".join(e.args).encode("utf-8"), ()))
                 print(end="! ");_f_write(Pair("syntax-error", _syntax_error));print()
@@ -1103,13 +1106,13 @@ def main(env=None):
                         error_continuation, message = message.car, message.cdr
                         _f_print_trace(error_continuation)
                     print(end="! ");_f_write(Pair(error_kind, message));print()
-                    if not len(sys.argv) >= 2:
+                    if not len(argv) >= 2:
                         env.bindings["last-error-continuation"] = error_continuation
                         env.bindings["last-error-message"] = message
                         break
                     exit(1)
                 if continuation is main_continuation:
-                    if not len(sys.argv) >= 2:
+                    if not len(argv) >= 2:
                         print(end="> ");_f_write(value);print()
                         env.bindings["last-value"] = value
                     break
