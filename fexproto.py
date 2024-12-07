@@ -1063,9 +1063,11 @@ def main(env=None, argv=None):
     # Fake continuation to represent the interpreter
     main_continuation = Continuation(Environment.ROOT, _f_passthrough, Continuation.ROOT)
 
-    with open(argv[1] if len(argv) >= 2 else 0, mode="rb") as file:
-        reader = _Reader(lambda: file.read(1), argv[1] if len(argv) >= 2 else "\x00stdin")
-        if not len(argv) >= 2:
+    interactive = (len(argv) == 1)
+
+    with open(argv[1] if not interactive else 0, mode="rb") as file:
+        reader = _Reader(lambda: file.read(1), argv[1] if not interactive else "\x00stdin")
+        if interactive:
             print(f'? --- interactive repl ---')
             print(f'? results are prefixed with > and errors with !')
             print(f'? try typing (($lambda (a b) (+ a b)) 1 2)')
@@ -1075,7 +1077,7 @@ def main(env=None, argv=None):
             except EOFError:
                 break
             except ValueError as e:
-                if len(argv) >= 2:
+                if not interactive:
                     raise
                 _syntax_error = Pair(type(e).__name__.encode("utf-8"), Pair(", ".join(e.args).encode("utf-8"), ()))
                 print(end="! ");_f_write(Pair("syntax-error", _syntax_error));print()
@@ -1106,13 +1108,13 @@ def main(env=None, argv=None):
                         error_continuation, message = message.car, message.cdr
                         _f_print_trace(error_continuation)
                     print(end="! ");_f_write(Pair(error_kind, message));print()
-                    if not len(argv) >= 2:
+                    if interactive:
                         env.bindings["last-error-continuation"] = error_continuation
                         env.bindings["last-error-message"] = message
                         break
                     exit(1)
                 if continuation is main_continuation:
-                    if not len(argv) >= 2:
+                    if interactive:
                         print(end="> ");_f_write(value);print()
                         env.bindings["last-value"] = value
                     break
