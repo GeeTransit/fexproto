@@ -63,10 +63,25 @@ temp2
         (p1? obj1)
         (eq? #f (p2? obj1))
         (eq? (d1 obj1) make-encapsulation-type))))
+(($lambda ()
+    ($define! $and? ($vau (dyn args)
+        ($cond
+            ((null? args) #t)
+            ((eval dyn (car args))
+                (apply (wrap $and?) (cdr args) dyn))
+            (#t #f))))
+    ($define! (b1 a1) (make-keyed-dynamic-variable))
+    ($define! (b2 a2) (make-keyed-dynamic-variable))
+    (b1 123 ($lambda ()
+        (b2 456 ($lambda ()
+            (b1 789 ($lambda ()
+                ($and?
+                    (eq? (a1) 789)
+                    (eq? (a2) 456))))))))))
 ''')
 exprs = fx.parse(tokens, filename="\x00test")
 env = fx._make_standard_environment()
-for expr, expected in zip(exprs, [7, 5, 10, "a", None, "a", None, "a", "c", 1, 0, True, True, True, fx.Pair(4, 6), None, fx.Pair(1, fx.Pair(2, fx.Pair(3, ()))), True, fx.Pair(1, ()), True, True, 2, True, b'abc', True, True, True, True, True, True, True, 1, True, True, True]):
+for expr, expected in zip(exprs, [7, 5, 10, "a", None, "a", None, "a", "c", 1, 0, True, True, True, fx.Pair(4, 6), None, fx.Pair(1, fx.Pair(2, fx.Pair(3, ()))), True, fx.Pair(1, ()), True, True, 2, True, b'abc', True, True, True, True, True, True, True, 1, True, True, True, True]):
     actual = fx.f_eval(env, expr)
     if expected is ...:
         continue
