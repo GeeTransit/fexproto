@@ -1,4 +1,4 @@
-import fexpron as fx
+import fexproto as fx
 tokens = fx.tokenize(r'''
 (+ (+ 1 1) (+ 2 3))
 (+ 1 4)
@@ -46,7 +46,7 @@ temp2
 (call/cc ($lambda (cc) (continuation? cc)))
 (char? #\a)
 (string? "abc")
-(eval (make-standard-environment) (list $sequence (list load "test_fexpron.lisp") ((unwrap list) . variable) 1))
+(eval (make-standard-environment) (list $sequence (list load "test_fexproto.lisp") ((unwrap list) . variable) 1))
 (eq? #t ($binds? (get-current-environment) car))
 (eq? #f ($binds? (get-current-environment) racecar))
 (($lambda ()

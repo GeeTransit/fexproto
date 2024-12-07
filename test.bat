@@ -1,1 +1,1 @@
-python test_fexpron.py
+python test_fexproto.py
