@@ -21,10 +21,18 @@ class Environment(Object):
         self.bindings = bindings
         self.parent = parent
 class Combiner(Object):
-    def __init__(self, num_wraps, func):
+    def __init__(self, num_wraps, func=None, operative=None):
         self.num_wraps = num_wraps
         self.func = func
+        self.operative = operative
 NIL = Nil()
+
+class Operative(object):
+    def __init__(self, env, envname, name, body):
+        self.env = env
+        self.envname = envname
+        self.name = name
+        self.body = body
 
 def f_eval(env, obj):
     if isinstance(obj, Symbol):
@@ -49,6 +57,14 @@ def f_eval(env, obj):
                 s = r.cdr
                 for _ in range(p): s.car = f_eval(env, s.car); s = s.cdr
             args = r.cdr
+        if combiner.func is None:
+            assert combiner.operative is not None
+            operative = combiner.operative
+            call_env = Environment({
+                operative.envname.name: env,
+                operative.name.name: args,
+            }, operative.env)
+            return f_eval(call_env, operative.body)
         return combiner.func(env, args)
     else:
         return obj
@@ -136,8 +152,27 @@ def _operative_plus(env, expr):
     b = expr.cdr.car
     return Int(a.value + b.value)
 
+# ($vau (dyn args) expr)
+def _operative_vau(env, expr):
+    if (
+        not isinstance(expr, Pair)
+        or not isinstance(expr.cdr, Pair)
+        or not isinstance(expr.cdr.cdr, Nil)
+        or not isinstance(expr.car, Pair)
+        or not isinstance(expr.car.cdr, Pair)
+        or not isinstance(expr.car.cdr.cdr, Nil)
+        or not isinstance(expr.car.car, Symbol)
+        or not isinstance(expr.car.cdr.car, Symbol)
+    ):
+        raise RuntimeError("expected ($vau (SYMBOL SYMBOL) ANY)")
+    envname = expr.car.car
+    name = expr.car.cdr.car
+    body = expr.cdr.car
+    return Combiner(0, operative=Operative(env, envname, name, body))
+
 _DEFAULT_ENV = {
     "+": Combiner(1, _operative_plus),
+    "$vau": Combiner(0, _operative_vau),
 }
 
 # == Entry point
