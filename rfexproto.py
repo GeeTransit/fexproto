@@ -170,9 +170,34 @@ def _operative_vau(env, expr):
     body = expr.cdr.car
     return Combiner(0, operative=Operative(env, envname, name, body))
 
+# (wrap combiner)
+def _operative_wrap(env, expr):
+    if (
+        not isinstance(expr, Pair)
+        or not isinstance(expr.cdr, Nil)
+        or not isinstance(expr.car, Combiner)
+    ):
+        raise RuntimeError("expected (wrap COMBINER)")
+    combiner = expr.car
+    return Combiner(combiner.num_wraps + 1, combiner.func, combiner.operative)
+
+# (unwrap combiner)
+def _operative_unwrap(env, expr):
+    if (
+        not isinstance(expr, Pair)
+        or not isinstance(expr.cdr, Nil)
+        or not isinstance(expr.car, Combiner)
+        or expr.car.num_wraps == 0
+    ):
+        raise RuntimeError("expected (unwrap COMBINER)")
+    combiner = expr.car
+    return Combiner(combiner.num_wraps - 1, combiner.func, combiner.operative)
+
 _DEFAULT_ENV = {
     "+": Combiner(1, _operative_plus),
     "$vau": Combiner(0, _operative_vau),
+    "wrap": Combiner(1, _operative_wrap),
+    "unwrap": Combiner(1, _operative_unwrap),
 }
 
 # == Entry point
