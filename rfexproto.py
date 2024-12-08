@@ -166,6 +166,38 @@ def _operative_plus(env, expr):
     b = expr.cdr.car
     return Int(a.value + b.value)
 
+# (eq? a b)
+def _operative_eq(env, expr):
+    if (
+        not isinstance(expr, Pair)
+        or not isinstance(expr.cdr, Pair)
+        or not isinstance(expr.cdr.cdr, Nil)
+    ):
+        raise RuntimeError("expected (eq? ANY ANY)")
+    a = expr.car
+    b = expr.cdr.car
+    if type(a) is not type(b):
+        return FALSE
+    if isinstance(a, Nil):
+        return TRUE
+    if isinstance(a, Boolean):
+        return TRUE if a.value == b.value else FALSE
+    if isinstance(a, Int):
+        return TRUE if a.value == b.value else FALSE
+    if isinstance(a, Symbol):
+        return TRUE if a.name == b.name else FALSE
+    return TRUE if a is b else FALSE
+
+# (pair? expr)
+def _operative_pair(env, expr):
+    if (
+        not isinstance(expr, Pair)
+        or not isinstance(expr.cdr, Nil)
+    ):
+        raise RuntimeError("expected (pair? ANY)")
+    pair = expr.car
+    return TRUE if isinstance(pair, Pair) else FALSE
+
 # (cons a b)
 def _operative_cons(env, expr):
     if (
@@ -277,6 +309,8 @@ def _operative_if(env, expr):
 
 _DEFAULT_ENV = {
     "+": Combiner(1, _operative_plus),
+    "eq?": Combiner(1, _operative_eq),
+    "pair?": Combiner(1, _operative_pair),
     "cons": Combiner(1, _operative_cons),
     "car": Combiner(1, _operative_car),
     "cdr": Combiner(1, _operative_cdr),
