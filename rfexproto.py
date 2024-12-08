@@ -286,6 +286,23 @@ def _operative_eval(env, expr):
     expression = expr.cdr.car
     return f_eval(environment, expression)
 
+# (make-environment [parent])
+def _operative_make_environment(env, expr):
+    if (
+        not isinstance(expr, Nil)
+        and not (
+            isinstance(expr, Pair)
+            and isinstance(expr.cdr, Nil)
+            and isinstance(expr.car, Environment)
+        )
+    ):
+        raise RuntimeError("expected (make-environment [ENVIRONMENT])")
+    if isinstance(expr, Nil):
+        environment = None
+    else:
+        environment = expr.car
+    return Environment({}, environment)
+
 # ($define! name value)
 def _operative_define(env, expr):
     if (
@@ -331,6 +348,7 @@ _DEFAULT_ENV = {
     "wrap": Combiner(1, _operative_wrap),
     "unwrap": Combiner(1, _operative_unwrap),
     "eval": Combiner(1, _operative_eval),
+    "make-environment": Combiner(1, _operative_make_environment),
     "$define!": Combiner(0, _operative_define),
     "$if": Combiner(0, _operative_if),
 }
