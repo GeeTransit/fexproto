@@ -23,6 +23,11 @@ class Environment(Object):
     def __init__(self, bindings, parent):
         self.bindings = bindings
         self.parent = parent
+class Continuation(Object):
+    def __init__(self, env, operative, parent):
+        self.env = env
+        self.operative = operative
+        self.parent = parent
 class Combiner(Object):
     def __init__(self, num_wraps, operative):
         self.num_wraps = num_wraps
@@ -32,51 +37,93 @@ TRUE = Boolean(True)
 FALSE = Boolean(False)
 
 class Operative(object):
-    def call(self, env, value): assert False
+    def call(self, env, value, parent): assert False
 class PrimitiveOperative(Operative):
     def __init__(self, func):
         self.func = func
-    def call(self, env, value):
-        return self.func(env, value)
+    def call(self, env, value, parent):
+        return self.func(env, value, parent)
 class UserDefinedOperative(Operative):
     def __init__(self, env, envname, name, body):
         self.env = env
         self.envname = envname
         self.name = name
         self.body = body
-    def call(self, env, value):
+    def call(self, env, value, parent):
         call_env = Environment({
             self.envname.name: env,
             self.name.name: value,
         }, self.env)
-        return f_eval(call_env, self.body)
+        return f_eval(call_env, self.body, parent)
 
-def f_eval(env, obj):
+def f_eval(env, obj, parent=None):
     if isinstance(obj, Symbol):
         while env is not None:
             if obj.name in env.bindings:
-                return env.bindings[obj.name]
+                return parent, env.bindings[obj.name]
             env = env.parent
-        raise RuntimeError("binding not found")
+        raise RuntimeError("binding not found", obj.name)
     elif isinstance(obj, Pair):
-        combiner = f_eval(env, obj.car)
-        args = obj.cdr
-        if not isinstance(combiner, Combiner):
-            raise RuntimeError("call car must be a combiner")
-        if combiner.num_wraps > 0:
-            c = args; p = 0
-            while isinstance(c, Pair): p += 1; c = c.cdr
-            if not isinstance(c, Nil):
-                raise RuntimeError("applicative call args must be proper list")
-            c = args; r = s = Pair(NIL, NIL)
-            for _ in range(p): s.cdr = s = Pair(c.car, NIL); c = c.cdr
-            for _ in range(combiner.num_wraps):
-                s = r.cdr
-                for _ in range(p): s.car = f_eval(env, s.car); s = s.cdr
-            args = r.cdr
-        return combiner.operative.call(env, args)
+        next_env = Environment({"env": env, "args": obj.cdr}, None)
+        next_operative = PrimitiveOperative(_step_call_wrapped)
+        next_continuation = Continuation(next_env, next_operative, parent)
+        return f_eval(env, obj.car, next_continuation)
     else:
-        return obj
+        return parent, obj
+
+def step_evaluate(continuation, value):
+    env = continuation.env
+    operative = continuation.operative
+    parent = continuation.parent
+    return operative.call(env, value, parent)
+
+def _step_call_wrapped(static, combiner, parent):
+    env = static.bindings["env"]
+    args = static.bindings["args"]
+    assert isinstance(combiner, Combiner)
+    if combiner.num_wraps == 0 or isinstance(args, Nil):
+        return Continuation(env, combiner.operative, parent), args
+    c = args; p = 0
+    while isinstance(c, Pair): p += 1; c = c.cdr
+    if not isinstance(c, Nil):
+        raise RuntimeError("applicative call args must be proper list")
+    c = args; r = s = Pair(NIL, NIL)
+    for _ in range(p): s.cdr = s = Pair(c.car, NIL); c = c.cdr
+    args = r.cdr
+    next_env = Environment({
+        "env": env,
+        "combiner": combiner,
+        "args": args,
+        "p": Int(p),
+        "i": Int(0),
+        "curr_arg": args,
+    }, None)
+    next_operative = PrimitiveOperative(_step_call_evcar)
+    next_continuation = Continuation(next_env, next_operative, parent)
+    return f_eval(env, args.car, next_continuation)
+
+def _step_call_evcar(static, value, parent):
+    env = static.bindings["env"]
+    combiner = static.bindings["combiner"]
+    p = static.bindings["p"]
+    i = static.bindings["i"]
+    curr_arg = static.bindings["curr_arg"]
+    curr_arg.car = value
+    i = Int(i.value + 1)
+    curr_arg = curr_arg.cdr
+    if i.value == p.value:
+        i = Int(0)
+        combiner = Combiner(combiner.num_wraps - 1, combiner.operative)
+        curr_arg = static.bindings["args"]
+        if combiner.num_wraps == 0:
+            continuation = Continuation(env, combiner.operative, parent)
+            return continuation, curr_arg
+        static.bindings["combiner"] = combiner
+    static.bindings["i"] = i
+    static.bindings["curr_arg"] = curr_arg
+    next_operative = PrimitiveOperative(_step_call_evcar)
+    next_continuation = Continuation(static, next_operative, parent)
+    return f_eval(env, curr_arg.car, next_continuation)
 
 # == Lexing, parsing, and writing logic
 
@@ -157,7 +204,7 @@ def _f_write(obj):
 # == Primitive combiners
 
 # (+ a b)
-def _operative_plus(env, expr):
+def _operative_plus(env, expr, parent):
     if (
         not isinstance(expr, Pair)
         or not isinstance(expr.cdr, Pair)
@@ -168,10 +215,10 @@ def _operative_plus(env, expr):
         raise RuntimeError("expected (+ INT INT)")
     a = expr.car
     b = expr.cdr.car
-    return Int(a.value + b.value)
+    return parent, Int(a.value + b.value)
 
 # (eq? a b)
-def _operative_eq(env, expr):
+def _operative_eq(env, expr, parent):
     if (
         not isinstance(expr, Pair)
         or not isinstance(expr.cdr, Pair)
@@ -181,29 +228,31 @@ def _operative_eq(env, expr):
     a = expr.car
     b = expr.cdr.car
     if type(a) is not type(b):
-        return FALSE
-    if isinstance(a, Nil):
-        return TRUE
-    if isinstance(a, Boolean):
-        return TRUE if a.value == b.value else FALSE
-    if isinstance(a, Int):
-        return TRUE if a.value == b.value else FALSE
-    if isinstance(a, Symbol):
-        return TRUE if a.name == b.name else FALSE
-    return TRUE if a is b else FALSE
+        result = FALSE
+    elif isinstance(a, Nil):
+        result = TRUE
+    elif isinstance(a, Boolean):
+        result = TRUE if a.value == b.value else FALSE
+    elif isinstance(a, Int):
+        result = TRUE if a.value == b.value else FALSE
+    elif isinstance(a, Symbol):
+        result = TRUE if a.name == b.name else FALSE
+    else:
+        result = TRUE if a is b else FALSE
+    return parent, result
 
 # (pair? expr)
-def _operative_pair(env, expr):
+def _operative_pair(env, expr, parent):
     if (
         not isinstance(expr, Pair)
         or not isinstance(expr.cdr, Nil)
     ):
         raise RuntimeError("expected (pair? ANY)")
     pair = expr.car
-    return TRUE if isinstance(pair, Pair) else FALSE
+    return parent, TRUE if isinstance(pair, Pair) else FALSE
 
 # (cons a b)
-def _operative_cons(env, expr):
+def _operative_cons(env, expr, parent):
     if (
         not isinstance(expr, Pair)
         or not isinstance(expr.cdr, Pair)
@@ -212,10 +261,10 @@ def _operative_cons(env, expr):
         raise RuntimeError("expected (cons ANY ANY)")
     a = expr.car
     b = expr.cdr.car
-    return Pair(a, b)
+    return parent, Pair(a, b)
 
 # (car pair)
-def _operative_car(env, expr):
+def _operative_car(env, expr, parent):
     if (
         not isinstance(expr, Pair)
         or not isinstance(expr.cdr, Nil)
@@ -223,10 +272,10 @@ def _operative_car(env, expr):
     ):
         raise RuntimeError("expected (car PAIR)")
     pair = expr.car
-    return pair.car
+    return parent, pair.car
 
 # (cdr pair)
-def _operative_cdr(env, expr):
+def _operative_cdr(env, expr, parent):
     if (
         not isinstance(expr, Pair)
         or not isinstance(expr.cdr, Nil)
@@ -234,10 +283,10 @@ def _operative_cdr(env, expr):
     ):
         raise RuntimeError("expected (cdr PAIR)")
     pair = expr.car
-    return pair.cdr
+    return parent, pair.cdr
 
 # ($vau (dyn args) expr)
-def _operative_vau(env, expr):
+def _operative_vau(env, expr, parent):
     if (
         not isinstance(expr, Pair)
         or not isinstance(expr.cdr, Pair)
@@ -252,10 +301,10 @@ def _operative_vau(env, expr):
     envname = expr.car.car
     name = expr.car.cdr.car
     body = expr.cdr.car
-    return Combiner(0, UserDefinedOperative(env, envname, name, body))
+    return parent, Combiner(0, UserDefinedOperative(env, envname, name, body))
 
 # (wrap combiner)
-def _operative_wrap(env, expr):
+def _operative_wrap(env, expr, parent):
     if (
         not isinstance(expr, Pair)
         or not isinstance(expr.cdr, Nil)
@@ -263,10 +312,10 @@ def _operative_wrap(env, expr):
     ):
         raise RuntimeError("expected (wrap COMBINER)")
     combiner = expr.car
-    return Combiner(combiner.num_wraps + 1, combiner.operative)
+    return parent, Combiner(combiner.num_wraps + 1, combiner.operative)
 
 # (unwrap combiner)
-def _operative_unwrap(env, expr):
+def _operative_unwrap(env, expr, parent):
     if (
         not isinstance(expr, Pair)
         or not isinstance(expr.cdr, Nil)
@@ -275,10 +324,10 @@ def _operative_unwrap(env, expr):
     ):
         raise RuntimeError("expected (unwrap COMBINER)")
     combiner = expr.car
-    return Combiner(combiner.num_wraps - 1, combiner.operative)
+    return parent, Combiner(combiner.num_wraps - 1, combiner.operative)
 
 # (eval env expr)
-def _operative_eval(env, expr):
+def _operative_eval(env, expr, parent):
     if (
         not isinstance(expr, Pair)
         or not isinstance(expr.cdr, Pair)
@@ -288,10 +337,10 @@ def _operative_eval(env, expr):
         raise RuntimeError("expected (eval ENVIRONMENT ANY)")
     environment = expr.car
     expression = expr.cdr.car
-    return f_eval(environment, expression)
+    return f_eval(environment, expression, parent)
 
 # (make-environment [parent])
-def _operative_make_environment(env, expr):
+def _operative_make_environment(env, expr, parent):
     if (
         not isinstance(expr, Nil)
         and not (
@@ -305,10 +354,15 @@ def _operative_make_environment(env, expr):
         environment = None
     else:
         environment = expr.car
-    return Environment({}, environment)
+    return parent, Environment({}, environment)
 
 # ($define! name value)
-def _operative_define(env, expr):
+def _f_define(static, value, parent):
+    env = static.bindings["env"]
+    name = static.bindings["name"]
+    env.bindings[name.name] = value
+    return parent, NIL
+def _operative_define(env, expr, parent):
     if (
         not isinstance(expr, Pair)
         or not isinstance(expr.cdr, Pair)
@@ -318,11 +372,22 @@ def _operative_define(env, expr):
         raise RuntimeError("expected ($define! SYMBOL ANY)")
     name = expr.car
     value = expr.cdr.car
-    env.bindings[name.name] = f_eval(env, value)
-    return NIL
+    next_env = Environment({"env": env, "name": name}, None)
+    next_operative = PrimitiveOperative(_f_define)
+    return f_eval(env, value, Continuation(next_env, next_operative, parent))
 
 # ($if cond then orelse)
-def _operative_if(env, expr):
+def _f_if(static, result, parent):
+    env = static.bindings["env"]
+    if not isinstance(result, Boolean):
+        raise RuntimeError("expected boolean test value")
+    if result.value:
+        then = static.bindings["then"]
+        return f_eval(env, then, parent)
+    else:
+        orelse = static.bindings["orelse"]
+        return f_eval(env, orelse, parent)
+def _operative_if(env, expr, parent):
     if (
         not isinstance(expr, Pair)
         or not isinstance(expr.cdr, Pair)
@@ -333,13 +398,9 @@ def _operative_if(env, expr):
     cond = expr.car
     then = expr.cdr.car
     orelse = expr.cdr.cdr.car
-    result = f_eval(env, cond)
-    if not isinstance(result, Boolean):
-        raise RuntimeError("expected boolean test value")
-    if result.value:
-        return f_eval(env, then)
-    else:
-        return f_eval(env, orelse)
+    next_env = Environment({"env": env, "then": then, "orelse": orelse}, None)
+    next_operative = PrimitiveOperative(_f_if)
+    return f_eval(env, cond, Continuation(next_env, next_operative, parent))
 
 def _primitive(num_wraps, func):
     return Combiner(num_wraps, PrimitiveOperative(func))
@@ -380,7 +441,10 @@ def main(argv):
     env = Environment({}, Environment(_DEFAULT_ENV, None))
     # Evaluate expressions and write their results
     for expr in exprs:
-        _f_write(f_eval(env, expr))
+        continuation, value = f_eval(env, expr)
+        while continuation is not None:
+            continuation, value = step_evaluate(continuation, value)
+        _f_write(value)
         print()
     return 0
 
