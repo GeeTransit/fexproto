@@ -6,6 +6,9 @@ class Object(object):
     pass
 class Nil(Object):
     pass
+class Boolean(Object):
+    def __init__(self, value):
+        self.value = value
 class Pair(Object):
     def __init__(self, car, cdr):
         self.car = car
@@ -26,6 +29,8 @@ class Combiner(Object):
         self.func = func
         self.operative = operative
 NIL = Nil()
+TRUE = Boolean(True)
+FALSE = Boolean(False)
 
 class Operative(object):
     def __init__(self, env, envname, name, body):
@@ -95,6 +100,10 @@ def parse(tokens):
         return NIL
     if token == "(":
         return _parse_elements(tokens)
+    if token == "#t" or token == "#T":
+        return TRUE
+    if token == "#f" or token == "#F":
+        return FALSE
     try:
         return Int(int(token))
     except ValueError:
@@ -122,6 +131,11 @@ def _f_write(obj):
         print(str(obj.value), end="")
     elif isinstance(obj, Symbol):
         print(obj.name, end="")
+    elif isinstance(obj, Boolean):
+        if obj.value:
+            print("#t", end="")
+        else:
+            print("#f", end="")
     elif isinstance(obj, Pair):
         print("(", end="")
         _f_write(obj.car)
