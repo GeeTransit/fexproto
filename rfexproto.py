@@ -273,6 +273,19 @@ def _operative_unwrap(env, expr):
     combiner = expr.car
     return Combiner(combiner.num_wraps - 1, combiner.func, combiner.operative)
 
+# (eval env expr)
+def _operative_eval(env, expr):
+    if (
+        not isinstance(expr, Pair)
+        or not isinstance(expr.cdr, Pair)
+        or not isinstance(expr.cdr.cdr, Nil)
+        or not isinstance(expr.car, Environment)
+    ):
+        raise RuntimeError("expected (eval ENVIRONMENT ANY)")
+    environment = expr.car
+    expression = expr.cdr.car
+    return f_eval(environment, expression)
+
 # ($define! name value)
 def _operative_define(env, expr):
     if (
@@ -317,6 +330,7 @@ _DEFAULT_ENV = {
     "$vau": Combiner(0, _operative_vau),
     "wrap": Combiner(1, _operative_wrap),
     "unwrap": Combiner(1, _operative_unwrap),
+    "eval": Combiner(1, _operative_eval),
     "$define!": Combiner(0, _operative_define),
     "$if": Combiner(0, _operative_if),
 }
