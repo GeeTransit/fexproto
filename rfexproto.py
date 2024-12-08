@@ -152,6 +152,40 @@ def _operative_plus(env, expr):
     b = expr.cdr.car
     return Int(a.value + b.value)
 
+# (cons a b)
+def _operative_cons(env, expr):
+    if (
+        not isinstance(expr, Pair)
+        or not isinstance(expr.cdr, Pair)
+        or not isinstance(expr.cdr.cdr, Nil)
+    ):
+        raise RuntimeError("expected (cons ANY ANY)")
+    a = expr.car
+    b = expr.cdr.car
+    return Pair(a, b)
+
+# (car pair)
+def _operative_car(env, expr):
+    if (
+        not isinstance(expr, Pair)
+        or not isinstance(expr.cdr, Nil)
+        or not isinstance(expr.car, Pair)
+    ):
+        raise RuntimeError("expected (car PAIR)")
+    pair = expr.car
+    return pair.car
+
+# (cdr pair)
+def _operative_cdr(env, expr):
+    if (
+        not isinstance(expr, Pair)
+        or not isinstance(expr.cdr, Nil)
+        or not isinstance(expr.car, Pair)
+    ):
+        raise RuntimeError("expected (cdr PAIR)")
+    pair = expr.car
+    return pair.cdr
+
 # ($vau (dyn args) expr)
 def _operative_vau(env, expr):
     if (
@@ -209,6 +243,9 @@ def _operative_define(env, expr):
 
 _DEFAULT_ENV = {
     "+": Combiner(1, _operative_plus),
+    "cons": Combiner(1, _operative_cons),
+    "car": Combiner(1, _operative_car),
+    "cdr": Combiner(1, _operative_cdr),
     "$vau": Combiner(0, _operative_vau),
     "wrap": Combiner(1, _operative_wrap),
     "unwrap": Combiner(1, _operative_unwrap),
