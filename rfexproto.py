@@ -24,20 +24,32 @@ class Environment(Object):
         self.bindings = bindings
         self.parent = parent
 class Combiner(Object):
-    def __init__(self, num_wraps, func=None, operative=None):
+    def __init__(self, num_wraps, operative):
         self.num_wraps = num_wraps
-        self.func = func
         self.operative = operative
 NIL = Nil()
 TRUE = Boolean(True)
 FALSE = Boolean(False)
 
 class Operative(object):
+    def call(self, env, value): assert False
+class PrimitiveOperative(Operative):
+    def __init__(self, func):
+        self.func = func
+    def call(self, env, value):
+        return self.func(env, value)
+class UserDefinedOperative(Operative):
     def __init__(self, env, envname, name, body):
         self.env = env
         self.envname = envname
         self.name = name
         self.body = body
+    def call(self, env, value):
+        call_env = Environment({
+            self.envname.name: env,
+            self.name.name: value,
+        }, self.env)
+        return f_eval(call_env, self.body)
 
 def f_eval(env, obj):
     if isinstance(obj, Symbol):
@@ -62,15 +74,7 @@ def f_eval(env, obj):
                 s = r.cdr
                 for _ in range(p): s.car = f_eval(env, s.car); s = s.cdr
             args = r.cdr
-        if combiner.func is None:
-            assert combiner.operative is not None
-            operative = combiner.operative
-            call_env = Environment({
-                operative.envname.name: env,
-                operative.name.name: args,
-            }, operative.env)
-            return f_eval(call_env, operative.body)
-        return combiner.func(env, args)
+        return combiner.operative.call(env, args)
     else:
         return obj
 
@@ -248,7 +252,7 @@ def _operative_vau(env, expr):
     envname = expr.car.car
     name = expr.car.cdr.car
     body = expr.cdr.car
-    return Combiner(0, operative=Operative(env, envname, name, body))
+    return Combiner(0, UserDefinedOperative(env, envname, name, body))
 
 # (wrap combiner)
 def _operative_wrap(env, expr):
@@ -259,7 +263,7 @@ def _operative_wrap(env, expr):
     ):
         raise RuntimeError("expected (wrap COMBINER)")
     combiner = expr.car
-    return Combiner(combiner.num_wraps + 1, combiner.func, combiner.operative)
+    return Combiner(combiner.num_wraps + 1, combiner.operative)
 
 # (unwrap combiner)
 def _operative_unwrap(env, expr):
@@ -271,7 +275,7 @@ def _operative_unwrap(env, expr):
     ):
         raise RuntimeError("expected (unwrap COMBINER)")
     combiner = expr.car
-    return Combiner(combiner.num_wraps - 1, combiner.func, combiner.operative)
+    return Combiner(combiner.num_wraps - 1, combiner.operative)
 
 # (eval env expr)
 def _operative_eval(env, expr):
@@ -337,20 +341,22 @@ def _operative_if(env, expr):
     else:
         return f_eval(env, orelse)
 
+def _primitive(num_wraps, func):
+    return Combiner(num_wraps, PrimitiveOperative(func))
 _DEFAULT_ENV = {
-    "+": Combiner(1, _operative_plus),
-    "eq?": Combiner(1, _operative_eq),
-    "pair?": Combiner(1, _operative_pair),
-    "cons": Combiner(1, _operative_cons),
-    "car": Combiner(1, _operative_car),
-    "cdr": Combiner(1, _operative_cdr),
-    "$vau": Combiner(0, _operative_vau),
-    "wrap": Combiner(1, _operative_wrap),
-    "unwrap": Combiner(1, _operative_unwrap),
-    "eval": Combiner(1, _operative_eval),
-    "make-environment": Combiner(1, _operative_make_environment),
-    "$define!": Combiner(0, _operative_define),
-    "$if": Combiner(0, _operative_if),
+    "+": _primitive(1, _operative_plus),
+    "eq?": _primitive(1, _operative_eq),
+    "pair?": _primitive(1, _operative_pair),
+    "cons": _primitive(1, _operative_cons),
+    "car": _primitive(1, _operative_car),
+    "cdr": _primitive(1, _operative_cdr),
+    "$vau": _primitive(0, _operative_vau),
+    "wrap": _primitive(1, _operative_wrap),
+    "unwrap": _primitive(1, _operative_unwrap),
+    "eval": _primitive(1, _operative_eval),
+    "make-environment": _primitive(1, _operative_make_environment),
+    "$define!": _primitive(0, _operative_define),
+    "$if": _primitive(0, _operative_if),
 }
 
 # == Entry point
