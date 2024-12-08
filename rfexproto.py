@@ -193,11 +193,26 @@ def _operative_unwrap(env, expr):
     combiner = expr.car
     return Combiner(combiner.num_wraps - 1, combiner.func, combiner.operative)
 
+# ($define! name value)
+def _operative_define(env, expr):
+    if (
+        not isinstance(expr, Pair)
+        or not isinstance(expr.cdr, Pair)
+        or not isinstance(expr.cdr.cdr, Nil)
+        or not isinstance(expr.car, Symbol)
+    ):
+        raise RuntimeError("expected ($define! SYMBOL ANY)")
+    name = expr.car
+    value = expr.cdr.car
+    env.bindings[name.name] = f_eval(env, value)
+    return NIL
+
 _DEFAULT_ENV = {
     "+": Combiner(1, _operative_plus),
     "$vau": Combiner(0, _operative_vau),
     "wrap": Combiner(1, _operative_wrap),
     "unwrap": Combiner(1, _operative_unwrap),
+    "$define!": Combiner(0, _operative_define),
 }
 
 # == Entry point
