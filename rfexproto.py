@@ -255,6 +255,26 @@ def _operative_define(env, expr):
     env.bindings[name.name] = f_eval(env, value)
     return NIL
 
+# ($if cond then orelse)
+def _operative_if(env, expr):
+    if (
+        not isinstance(expr, Pair)
+        or not isinstance(expr.cdr, Pair)
+        or not isinstance(expr.cdr.cdr, Pair)
+        or not isinstance(expr.cdr.cdr.cdr, Nil)
+    ):
+        raise RuntimeError("expected ($if ANY ANY ANY)")
+    cond = expr.car
+    then = expr.cdr.car
+    orelse = expr.cdr.cdr.car
+    result = f_eval(env, cond)
+    if not isinstance(result, Boolean):
+        raise RuntimeError("expected boolean test value")
+    if result.value:
+        return f_eval(env, then)
+    else:
+        return f_eval(env, orelse)
+
 _DEFAULT_ENV = {
     "+": Combiner(1, _operative_plus),
     "cons": Combiner(1, _operative_cons),
@@ -264,6 +284,7 @@ _DEFAULT_ENV = {
     "wrap": Combiner(1, _operative_wrap),
     "unwrap": Combiner(1, _operative_unwrap),
     "$define!": Combiner(0, _operative_define),
+    "$if": Combiner(0, _operative_if),
 }
 
 # == Entry point
