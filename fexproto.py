@@ -40,6 +40,7 @@ class Operative:
         call_env = Environment({self.envname: dyn, self.name: args}, self.env)
         continuation = Continuation(call_env, self.body, parent)
         return continuation, None
+_f_passthrough = Operative(Environment.ROOT, "_", "value", "value")
 
 class Pair:
     def __init__(self, car, cdr):
@@ -467,9 +468,6 @@ def _f_static_accessor(env, _value, parent):
                     return parent, value
         environment = environment.parent
     return _f_error(parent, b"no static binding found")
-
-def _f_passthrough(_env, value, parent):  # Useful for root REPL continuations
-    return parent, value
 
 def _f_sequence_inert(env, expr, parent):
     seq_env = env.bindings["env"]
