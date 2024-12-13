@@ -18,11 +18,11 @@ class Continuation:
     def __init__(self, env, expr, parent):
         assert type(env) is Environment, f'env must be type Environment, got: {type(env)}'
         self.env = env
+        assert callable(expr), f'expr must be callable, got: {type(expr)}'
         self.expr = expr
         assert type(parent) is Continuation, f'parent must be type Continuation, got: {type(parent)}'
         self.parent = parent
 Continuation.ROOT = object.__new__(Continuation)
-Continuation.ERROR = Continuation(Environment.ROOT, None, Continuation.ROOT)
 
 class Operative:
     def __init__(self, env, envname, name, body):
@@ -38,9 +38,10 @@ class Operative:
         # args is call arguments
         # parent is parent continuation
         call_env = Environment({self.envname: dyn, self.name: args}, self.env)
-        continuation = Continuation(call_env, self.body, parent)
-        return continuation, None
+        continuation = Continuation(call_env, _step_eval, parent)
+        return continuation, self.body
 _f_passthrough = Operative(Environment.ROOT, "_", "value", "value")
+Continuation.ERROR = Continuation(Environment.ROOT, _f_passthrough, Continuation.ROOT)
 
 class Pair:
     def __init__(self, car, cdr):
@@ -75,7 +76,7 @@ def f_eval(env, expr):
         env = Environment(env, Environment.ROOT)
     continuation = Continuation(Environment.ROOT, _f_passthrough, Continuation.ROOT)
     continuation._call_info = ["f_eval", expr]
-    continuation, value = Continuation(env, expr, continuation), None
+    continuation, value = Continuation(env, _step_eval, continuation), expr
     while continuation is not Continuation.ROOT:
         continuation, value = step_evaluate(continuation, value)
         if continuation is Continuation.ERROR:
@@ -89,8 +90,8 @@ def _f_error(parent, *args):
     for arg in reversed(args): message_tree = Pair(arg, message_tree)
     message_tree = Pair(parent, message_tree)
     expr = Pair(error_operative, message_tree)
-    continuation = Continuation(Environment.ROOT, expr, parent)
-    return continuation, None
+    continuation = Continuation(Environment.ROOT, _step_eval, parent)
+    return continuation, expr
 
 def _f_copy_es(obj, *, seen=None, immutable=False):
     if type(obj) is not Pair:
@@ -183,6 +184,9 @@ def step_evaluate(continuation, value):
     env = continuation.env
     expr = continuation.expr
     parent = continuation.parent
+    return expr(env, value, parent=parent)
+
+def _step_eval(env, expr, parent):
     if type(expr) is str:
         while env is not Environment.ROOT:
             if expr in env.bindings:
@@ -198,8 +202,8 @@ def step_evaluate(continuation, value):
         continuation = Continuation(next_env, _step_call_wrapped, parent)
         continuation = Continuation(Environment.ROOT, _step_call_combcar, continuation)
         continuation._call_info = ["eval combiner car", expr.car]  # non-tail call
-        continuation = Continuation(env, name, continuation)
-        return continuation, None
+        continuation = Continuation(env, _step_eval, continuation)
+        return continuation, name
     elif type(expr) is not _FUNCTION_TYPE and type(expr) is not Operative:
         return parent, expr
     else:
@@ -302,8 +306,8 @@ def _step_call_wrapped(static, combiner, parent):
     }, Environment.ROOT)
     continuation = Continuation(next_env, _step_call_evcar, parent)
     continuation._call_info = ["eval combiner arg", eval_args.car.car]
-    continuation = Continuation(env, eval_args.car.car, continuation)
-    return continuation, None
+    continuation = Continuation(env, _step_eval, continuation)
+    return continuation, eval_args.car.car
 
 def _step_call_evcar(static, value, parent):
     env = static.bindings["env"]
@@ -326,8 +330,8 @@ def _step_call_evcar(static, value, parent):
     static.bindings["eval_arg"] = eval_arg
     continuation = Continuation(static, _step_call_evcar, parent)
     continuation._call_info = ["eval combiner arg", eval_arg.car.car]
-    continuation = Continuation(env, eval_arg.car.car, continuation)
-    return continuation, None
+    continuation = Continuation(env, _step_eval, continuation)
+    return continuation, eval_arg.car.car
 
 # modify environment according to name
 def _f_define(static, expr, parent):
@@ -340,11 +344,11 @@ def _f_if(env, result, parent):
     if result is True:
         on_true = env.bindings["on_true"]
         env = env.bindings["env"]
-        return Continuation(env, on_true, parent), None
+        return Continuation(env, _step_eval, parent), on_true
     if result is False:
         on_false = env.bindings["on_false"]
         env = env.bindings["env"]
-        return Continuation(env, on_false, parent), None
+        return Continuation(env, _step_eval, parent), on_false
     return _f_error(parent, b"expected #t or #f as condition for $if, got: ", result)
 
 def _f_force_normal_pass(env, value, parent):
@@ -477,8 +481,8 @@ def _f_sequence_inert(env, expr, parent):
     next_env = Environment({"env": seq_env, "exprs": seq_exprs.cdr}, Environment.ROOT)
     continuation = Continuation(next_env, _f_sequence_inert, parent)
     continuation._call_info = ["eval sequence inert", seq_exprs.car]  # non-tail call
-    continuation = Continuation(seq_env, seq_exprs.car, continuation)
-    return continuation, None
+    continuation = Continuation(seq_env, _step_eval, continuation)
+    return continuation, seq_exprs.car
 
 def _operative_number(env, expr, parent):
     return parent, type(expr.car) in (int, float)
@@ -504,8 +508,8 @@ def _operative_vau(env, expr, parent):
     return parent, Combiner(0, operative)
 
 def _operative_eval(env, expr, parent):
-    continuation = Continuation(expr.car, expr.cdr.car, parent)
-    return continuation, None
+    continuation = Continuation(expr.car, _step_eval, parent)
+    return continuation, expr.cdr.car
 
 def _operative_wrap(env, expr, parent):
     return parent, Combiner(expr.car.num_wraps + 1, expr.car.func)
@@ -517,8 +521,8 @@ def _operative_define(env, expr, parent):
     next_env = Environment({"env": env, "name": expr.car}, Environment.ROOT)
     continuation = Continuation(next_env, _f_define, parent)
     continuation._call_info = ["define value", expr.cdr.car]  # non-tail call
-    continuation = Continuation(env, expr.cdr.car, continuation)
-    return continuation, None
+    continuation = Continuation(env, _step_eval, continuation)
+    return continuation, expr.cdr.car
 
 def _operative_car(env, expr, parent):
     return parent, expr.car.car
@@ -568,8 +572,8 @@ def _operative_if(env, expr, parent):
     next_env = Environment({"env": env, "on_true": expr.cdr.car, "on_false": expr.cdr.cdr.car}, Environment.ROOT)
     continuation = Continuation(next_env, _f_if, parent)
     continuation._call_info = ["if condition", expr.car]  # non-tail call
-    continuation = Continuation(env, expr.car, continuation)
-    return continuation, None
+    continuation = Continuation(env, _step_eval, continuation)
+    return continuation, expr.car
 
 def _operative_eq(env, expr, parent):
     return (parent,
@@ -596,7 +600,7 @@ def _operative_continuation_to_applicative(_env, expr, parent):
     if type(continuation) is not Continuation:
         return _f_error(parent, b"continuation must be type Continuation, got: ", continuation)
     env = Environment({"continuation": continuation}, Environment.ROOT)
-    operative = Operative(env, "_", "value", _f_abnormal_pass)
+    operative = Operative(env, "_", "value", Pair(Combiner(0, _f_abnormal_pass), ()))
     return parent, Combiner(1, operative)
 
 def _operative_call_cc(env, expr, parent):
@@ -648,23 +652,23 @@ def _operative_guard_continuation(env, expr, parent):
 def _operative_make_encapsulation_type(env, expr, parent):
     encap_obj = object()
     encap_env = Environment({"encap_obj": encap_obj}, Environment.ROOT)
-    encapsulator = Combiner(1, Operative(encap_env, "_", "value", _f_encapsulate))
-    predicate = Combiner(1, Operative(encap_env, "_", "value", _f_check_encapsulation))
-    decapsulator = Combiner(1, Operative(encap_env, "_", "value", _f_decapsulate))
+    encapsulator = Combiner(1, Operative(encap_env, "_", "value", Pair(Combiner(0, _f_encapsulate), ())))
+    predicate = Combiner(1, Operative(encap_env, "_", "value", Pair(Combiner(0, _f_check_encapsulation), ())))
+    decapsulator = Combiner(1, Operative(encap_env, "_", "value", Pair(Combiner(0, _f_decapsulate), ())))
     return parent, Pair(encapsulator, Pair(predicate, Pair(decapsulator, ())))
 
 def _operative_make_keyed_dynamic_variable(env, expr, parent):
     dynamic_obj = object()
     dynamic_env = Environment({"dynamic_obj": dynamic_obj}, Environment.ROOT)
-    binder = Combiner(1, Operative(dynamic_env, "_", "value", _f_dynamic_binder))
-    accessor = Combiner(1, Operative(dynamic_env, "_", "value", _f_dynamic_accessor))
+    binder = Combiner(1, Operative(dynamic_env, "_", "value", Pair(Combiner(0, _f_dynamic_binder), ())))
+    accessor = Combiner(1, Operative(dynamic_env, "_", "value", Pair(Combiner(0, _f_dynamic_accessor), ())))
     return parent, Pair(binder, Pair(accessor, ()))
 
 def _operative_make_keyed_static_variable(env, expr, parent):
     static_obj = object()
     static_env = Environment({"static_obj": static_obj}, Environment.ROOT)
-    binder = Combiner(1, Operative(static_env, "_", "value", _f_static_binder))
-    accessor = Combiner(1, Operative(static_env, "dyn", "value", _f_static_accessor))
+    binder = Combiner(1, Operative(static_env, "_", "value", Pair(Combiner(0, _f_static_binder), ())))
+    accessor = Combiner(1, Operative(static_env, "dyn", "value", Pair(Combiner(0, _f_static_accessor), ())))
     return parent, Pair(binder, Pair(accessor, ()))
 
 def _operative_char(env, expr, parent):
@@ -974,7 +978,7 @@ def _make_standard_environment(*, primitives=None):
     for expr in exprs:
         continuation = Continuation(Environment.ROOT, _f_passthrough, Continuation.ROOT)
         continuation._call_info = ["stdlib eval", expr]
-        continuation, value = Continuation(env, expr, continuation), None
+        continuation, value = Continuation(env, _step_eval, continuation), expr
         while continuation is not Continuation.ROOT:
             continuation, value = step_evaluate(continuation, value)
             if continuation is Continuation.ERROR:
@@ -1088,7 +1092,7 @@ def main(env=None, argv=None):
 
             continuation = Continuation(Environment.ROOT, _f_passthrough, main_continuation)
             continuation._call_info = ["repl eval", expr]
-            continuation, value = Continuation(env, expr, continuation), None
+            continuation, value = Continuation(env, _step_eval, continuation), expr
             while continuation is not Continuation.ROOT:
                 try:
                     continuation, value = step_evaluate(continuation, value)
