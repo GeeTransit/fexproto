@@ -80,8 +80,7 @@ def f_eval(env, obj, parent=None):
         raise RuntimeError("binding not found", obj.name)
     elif isinstance(obj, Pair):
         next_env = Environment({"env": env, "args": obj.cdr}, None)
-        next_operative = PrimitiveOperative(_step_call_wrapped)
-        next_continuation = Continuation(next_env, next_operative, parent)
+        next_continuation = Continuation(next_env, _STEP_CALL_WRAPPED, parent)
         return f_eval(env, obj.car, next_continuation)
     else:
         return parent, obj
@@ -115,9 +114,9 @@ def _step_call_wrapped(static, combiner, parent):
         "i": Int(0),
         "curr_arg": args,
     }, None)
-    next_operative = PrimitiveOperative(_step_call_evcar)
-    next_continuation = Continuation(next_env, next_operative, parent)
+    next_continuation = Continuation(next_env, _STEP_CALL_EVCAR, parent)
     return f_eval(env, args.car, next_continuation)
+_STEP_CALL_WRAPPED = PrimitiveOperative(_step_call_wrapped)
 
 def _step_call_evcar(static, value, parent):
     env = static.bindings["env"]
@@ -145,9 +144,9 @@ def _step_call_evcar(static, value, parent):
     static.bindings["i"] = i
     assert isinstance(curr_arg, Pair)
     static.bindings["curr_arg"] = curr_arg
-    next_operative = PrimitiveOperative(_step_call_evcar)
-    next_continuation = Continuation(static, next_operative, parent)
+    next_continuation = Continuation(static, _STEP_CALL_EVCAR, parent)
     return f_eval(env, curr_arg.car, next_continuation)
+_STEP_CALL_EVCAR = PrimitiveOperative(_step_call_evcar)
 
 # == Lexing, parsing, and writing logic
 
@@ -376,6 +375,7 @@ def _f_define(static, value, parent):
     assert isinstance(name, Symbol)
     env.bindings[name.name] = value
     return parent, NIL
+_F_DEFINE = PrimitiveOperative(_f_define)
 def _operative_define(env, expr, parent):
     _ERROR = "expected ($define! SYMBOL ANY)"
     if not isinstance(expr, Pair): raise RuntimeError(_ERROR)
@@ -386,8 +386,7 @@ def _operative_define(env, expr, parent):
     if not isinstance(name, Symbol): raise RuntimeError(_ERROR)
     value = expr_cdr.car
     next_env = Environment({"env": env, "name": name}, None)
-    next_operative = PrimitiveOperative(_f_define)
-    return f_eval(env, value, Continuation(next_env, next_operative, parent))
+    return f_eval(env, value, Continuation(next_env, _F_DEFINE, parent))
 
 # ($if cond then orelse)
 def _f_if(static, result, parent):
@@ -400,6 +399,7 @@ def _f_if(static, result, parent):
     else:
         orelse = static.bindings["orelse"]
         return f_eval(env, orelse, parent)
+_F_IF = PrimitiveOperative(_f_if)
 def _operative_if(env, expr, parent):
     _ERROR = "expected ($if ANY ANY ANY)"
     if not isinstance(expr, Pair): raise RuntimeError(_ERROR)
@@ -412,8 +412,7 @@ def _operative_if(env, expr, parent):
     then = expr_cdr.car
     orelse = expr_cdr_cdr.car
     next_env = Environment({"env": env, "then": then, "orelse": orelse}, None)
-    next_operative = PrimitiveOperative(_f_if)
-    return f_eval(env, cond, Continuation(next_env, next_operative, parent))
+    return f_eval(env, cond, Continuation(next_env, _F_IF, parent))
 
 def _primitive(num_wraps, func):
     return Combiner(num_wraps, PrimitiveOperative(func))
