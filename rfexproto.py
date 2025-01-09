@@ -171,7 +171,7 @@ def tokenize(text):
 def parse(tokens):
     token = tokens.pop()
     if token == ")":
-        return NIL
+        raise RuntimeError("unmatched close bracket")
     if token == "(":
         return _parse_elements(tokens)
     if token == "#t" or token == "#T":
