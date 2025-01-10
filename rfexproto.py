@@ -71,6 +71,9 @@ class UserDefinedOperative(Operative):
         return f_eval(call_env, self.body, parent)
 
 def f_eval(env, obj, parent=None):
+    return Continuation(env, _STEP_EVAL, parent), obj
+
+def _step_eval(env, obj, parent):
     if isinstance(obj, Symbol):
         assert isinstance(env, Environment)
         while env is not None:
@@ -84,6 +87,7 @@ def f_eval(env, obj, parent=None):
         return f_eval(env, obj.car, next_continuation)
     else:
         return parent, obj
+_STEP_EVAL = PrimitiveOperative(_step_eval)
 
 def step_evaluate(continuation, value):
     env = continuation.env
