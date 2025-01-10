@@ -70,6 +70,42 @@ class UserDefinedOperative(Operative):
         }, self.env)
         return f_eval(call_env, self.body, parent)
 
+# Specialized environments
+
+class StepWrappedEnvironment(Environment):
+    _attrs_ = Environment._attrs_ + ("env", "args")
+    _immutable_fields_ = Environment._immutable_fields_
+    def __init__(self, env, args):
+        Environment.__init__(self, None, None)
+        self.env = env
+        self.args = args
+class StepEvCarEnvironment(Environment):
+    _attrs_ = Environment._attrs_ + ("env", "combiner", "args", "p", "i", "curr_arg")
+    _immutable_fields_ = Environment._immutable_fields_
+    def __init__(self, env, combiner, args, p, i, curr_arg):
+        Environment.__init__(self, None, None)
+        self.env = env
+        self.combiner = combiner
+        self.args = args
+        self.p = p
+        self.i = i
+        self.curr_arg = curr_arg
+class FIfEnvironment(Environment):
+    _attrs_ = Environment._attrs_ + ("env", "then", "orelse")
+    _immutable_fields_ = Environment._immutable_fields_
+    def __init__(self, env, then, orelse):
+        Environment.__init__(self, None, None)
+        self.env = env
+        self.then = then
+        self.orelse = orelse
+class FDefineEnvironment(Environment):
+    _attrs_ = Environment._attrs_ + ("env", "name")
+    _immutable_fields_ = Environment._immutable_fields_
+    def __init__(self, env, name):
+        Environment.__init__(self, None, None)
+        self.env = env
+        self.name = name
+
 # Core interpreter logic
 
 def f_return(parent, obj):
@@ -86,7 +122,7 @@ def _step_eval(env, obj, parent):
             env = env.parent
         raise RuntimeError("binding not found", obj.name)
     elif isinstance(obj, Pair):
-        next_env = Environment({"env": env, "args": obj.cdr}, None)
+        next_env = StepWrappedEnvironment(env, obj.cdr)
         next_continuation = Continuation(next_env, _STEP_CALL_WRAPPED, parent)
         return f_eval(env, obj.car, next_continuation)
     else:
@@ -107,8 +143,9 @@ def fully_evaluate(state):
     return value
 
 def _step_call_wrapped(static, combiner, parent):
-    env = static.bindings["env"]
-    args = static.bindings["args"]
+    assert isinstance(static, StepWrappedEnvironment)
+    env = static.env
+    args = static.args
     assert isinstance(combiner, Combiner)
     if combiner.num_wraps == 0 or isinstance(args, Nil):
         return f_return(Continuation(env, combiner.operative, parent), args)
@@ -121,44 +158,38 @@ def _step_call_wrapped(static, combiner, parent):
     for _ in range(p): assert isinstance(c, Pair); s.cdr = s = Pair(c.car, NIL); c = c.cdr
     args = r.cdr
     assert isinstance(args, Pair)
-    next_env = Environment({
-        "env": env,
-        "combiner": combiner,
-        "args": args,
-        "p": Int(p),
-        "i": Int(0),
-        "curr_arg": args,
-    }, None)
+    next_env = StepEvCarEnvironment(env, combiner, args, p, 0, args)
     next_continuation = Continuation(next_env, _STEP_CALL_EVCAR, parent)
     return f_eval(env, args.car, next_continuation)
 _STEP_CALL_WRAPPED = PrimitiveOperative(_step_call_wrapped)
 
 def _step_call_evcar(static, value, parent):
-    env = static.bindings["env"]
+    assert isinstance(static, StepEvCarEnvironment)
+    env = static.env
     assert isinstance(env, Environment)
-    combiner = static.bindings["combiner"]
+    combiner = static.combiner
     assert isinstance(combiner, Combiner)
-    p = static.bindings["p"]
-    assert isinstance(p, Int)
-    i = static.bindings["i"]
-    assert isinstance(i, Int)
-    curr_arg = static.bindings["curr_arg"]
+    p = static.p
+    assert isinstance(p, int)
+    i = static.i
+    assert isinstance(i, int)
+    curr_arg = static.curr_arg
     assert isinstance(curr_arg, Pair)
     curr_arg.car = value
-    i = Int(i.value + 1)
+    i = i + 1
     curr_arg = curr_arg.cdr
-    if i.value == p.value:
-        i = Int(0)
+    if i == p:
+        i = 0
         combiner = Combiner(combiner.num_wraps - 1, combiner.operative)
-        curr_arg = static.bindings["args"]
+        curr_arg = static.args
         assert isinstance(curr_arg, Pair)
         if combiner.num_wraps == 0:
             continuation = Continuation(env, combiner.operative, parent)
             return f_return(continuation, curr_arg)
-        static.bindings["combiner"] = combiner
-    static.bindings["i"] = i
+        static.combiner = combiner
+    static.i = i
     assert isinstance(curr_arg, Pair)
-    static.bindings["curr_arg"] = curr_arg
+    static.curr_arg = curr_arg
     next_continuation = Continuation(static, _STEP_CALL_EVCAR, parent)
     return f_eval(env, curr_arg.car, next_continuation)
 _STEP_CALL_EVCAR = PrimitiveOperative(_step_call_evcar)
@@ -384,9 +415,10 @@ def _operative_make_environment(env, expr, parent):
 
 # ($define! name value)
 def _f_define(static, value, parent):
-    env = static.bindings["env"]
+    assert isinstance(static, FDefineEnvironment)
+    env = static.env
     assert isinstance(env, Environment)
-    name = static.bindings["name"]
+    name = static.name
     assert isinstance(name, Symbol)
     env.bindings[name.name] = value
     return f_return(parent, NIL)
@@ -400,19 +432,20 @@ def _operative_define(env, expr, parent):
     name = expr.car
     if not isinstance(name, Symbol): raise RuntimeError(_ERROR)
     value = expr_cdr.car
-    next_env = Environment({"env": env, "name": name}, None)
+    next_env = FDefineEnvironment(env, name)
     return f_eval(env, value, Continuation(next_env, _F_DEFINE, parent))
 
 # ($if cond then orelse)
 def _f_if(static, result, parent):
-    env = static.bindings["env"]
+    assert isinstance(static, FIfEnvironment)
+    env = static.env
     if not isinstance(result, Boolean):
         raise RuntimeError("expected boolean test value")
     if result.value:
-        then = static.bindings["then"]
+        then = static.then
         return f_eval(env, then, parent)
     else:
-        orelse = static.bindings["orelse"]
+        orelse = static.orelse
         return f_eval(env, orelse, parent)
 _F_IF = PrimitiveOperative(_f_if)
 def _operative_if(env, expr, parent):
@@ -426,7 +459,7 @@ def _operative_if(env, expr, parent):
     cond = expr.car
     then = expr_cdr.car
     orelse = expr_cdr_cdr.car
-    next_env = Environment({"env": env, "then": then, "orelse": orelse}, None)
+    next_env = FIfEnvironment(env, then, orelse)
     return f_eval(env, cond, Continuation(next_env, _F_IF, parent))
 
 def _primitive(num_wraps, func):
