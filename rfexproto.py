@@ -6,6 +6,8 @@ class Object(object):
     _attrs_ = _immutable_fields_ = ()
 class Nil(Object):
     _attrs_ = _immutable_fields_ = ()
+class Ignore(Object):
+    _attrs_ = _immutable_fields_ = ()
 class Boolean(Object):
     _attrs_ = _immutable_fields_ = ("value",)
     def __init__(self, value):
@@ -44,6 +46,7 @@ class Combiner(Object):
         self.num_wraps = num_wraps
         self.operative = operative
 NIL = Nil()
+IGNORE = Ignore()
 TRUE = Boolean(True)
 FALSE = Boolean(False)
 
@@ -64,10 +67,13 @@ class UserDefinedOperative(Operative):
         self.name = name
         self.body = body
     def call(self, env, value, parent):
-        call_env = Environment({
-            self.envname.name: env,
-            self.name.name: value,
-        }, self.env)
+        call_env = Environment({}, self.env)
+        envname = self.envname
+        if isinstance(envname, Symbol):
+            call_env.bindings[envname.name] = env
+        name = self.name
+        if isinstance(name, Symbol):
+            call_env.bindings[name.name] = env
         return f_eval(call_env, self.body, parent)
 
 # Specialized environments
@@ -219,6 +225,8 @@ def parse(tokens):
         return TRUE
     if token == "#f" or token == "#F":
         return FALSE
+    if token.lower() == "#ignore":
+        return IGNORE
     try:
         return Int(int(token))
     except ValueError:
@@ -246,6 +254,8 @@ def _f_write(obj):
         print(str(obj.value), end="")
     elif isinstance(obj, Symbol):
         print(obj.name, end="")
+    elif isinstance(obj, Ignore):
+        print("#ignore", end="")
     elif isinstance(obj, Boolean):
         if obj.value:
             print("#t", end="")
@@ -295,6 +305,8 @@ def _operative_eq(env, expr, parent):
     if type(a) is not type(b):
         result = FALSE
     elif isinstance(a, Nil):
+        result = TRUE
+    elif isinstance(a, Ignore):
         result = TRUE
     elif isinstance(a, Boolean):
         assert isinstance(b, Boolean)
@@ -348,7 +360,7 @@ def _operative_cdr(env, expr, parent):
 
 # ($vau (dyn args) expr)
 def _operative_vau(env, expr, parent):
-    _ERROR = "expected ($vau (SYMBOL SYMBOL) ANY)"
+    _ERROR = "expected ($vau (PARAM PARAM) ANY)"
     if not isinstance(expr, Pair): raise RuntimeError(_ERROR)
     expr_cdr = expr.cdr
     if not isinstance(expr_cdr, Pair): raise RuntimeError(_ERROR)
@@ -359,9 +371,9 @@ def _operative_vau(env, expr, parent):
     if not isinstance(expr_car_cdr, Pair): raise RuntimeError(_ERROR)
     if not isinstance(expr_car_cdr.cdr, Nil): raise RuntimeError(_ERROR)
     envname = expr_car.car
-    if not isinstance(envname, Symbol): raise RuntimeError(_ERROR)
+    if not isinstance(envname, Symbol) and not isinstance(envname, Ignore): raise RuntimeError(_ERROR)
     name = expr_car_cdr.car
-    if not isinstance(name, Symbol): raise RuntimeError(_ERROR)
+    if not isinstance(name, Symbol) and not isinstance(name, Ignore): raise RuntimeError(_ERROR)
     body = expr_cdr.car
     return f_return(parent, Combiner(0, UserDefinedOperative(env, envname, name, body)))
 
@@ -414,18 +426,19 @@ def _f_define(static, value, parent):
     env = static.env
     assert isinstance(env, Environment)
     name = static.name
-    assert isinstance(name, Symbol)
-    env.bindings[name.name] = value
+    assert isinstance(name, Symbol) or isinstance(name, Ignore)
+    if isinstance(name, Symbol):
+        env.bindings[name.name] = env
     return f_return(parent, NIL)
 _F_DEFINE = PrimitiveOperative(_f_define)
 def _operative_define(env, expr, parent):
-    _ERROR = "expected ($define! SYMBOL ANY)"
+    _ERROR = "expected ($define! PARAM ANY)"
     if not isinstance(expr, Pair): raise RuntimeError(_ERROR)
     expr_cdr = expr.cdr
     if not isinstance(expr_cdr, Pair): raise RuntimeError(_ERROR)
     if not isinstance(expr_cdr.cdr, Nil): raise RuntimeError(_ERROR)
     name = expr.car
-    if not isinstance(name, Symbol): raise RuntimeError(_ERROR)
+    if not isinstance(name, Symbol) and not isinstance(name, Ignore): raise RuntimeError(_ERROR)
     value = expr_cdr.car
     next_env = FDefineEnvironment(env, name)
     return f_eval(env, value, Continuation(next_env, _F_DEFINE, parent))
