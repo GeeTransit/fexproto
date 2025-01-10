@@ -1,5 +1,19 @@
 from __future__ import print_function
 
+# Optional RPython imports
+try:
+    from rpython.rlib import jit
+except ImportError:
+    class jit(object):
+        class JitDriver(object):
+            def __init__(self, **kwargs): pass
+            def jit_merge_point(self, **kwargs): pass
+            def can_enter_jit(self, **kwargs): pass
+        @staticmethod
+        def set_param(*args): pass
+        @staticmethod
+        def unroll_safe(func): return func
+
 # == Interpreter types and logic
 
 class Object(object):
@@ -142,12 +156,28 @@ def step_evaluate(state):
     else:
         return f_return(parent, obj)
 
+jitdriver = jit.JitDriver(
+    greens=["expr"],
+    reds=["env", "continuation"],
+    is_recursive=True,
+)
+
 def fully_evaluate(state):
     expr, env, continuation = state
     while continuation is not None or env is not None:
+        if continuation is not None and continuation.operative is _F_LOOP_HEAD:
+            jitdriver.can_enter_jit(expr=expr, env=env, continuation=continuation)
+        jitdriver.jit_merge_point(expr=expr, env=env, continuation=continuation)
         expr, env, continuation = step_evaluate((expr, env, continuation))
     return expr
 
+# TODO: Look into how Pycket does runtime call-graph construction to
+# automatically infer loops. See https://doi.org/10.1145/2858949.2784740
+def _f_loop_head(env, expr, parent):
+    return f_return(parent, expr)
+_F_LOOP_HEAD = PrimitiveOperative(_f_loop_head)
+
+@jit.unroll_safe
 def _step_call_wrapped(static, combiner, parent):
     assert isinstance(static, StepWrappedEnvironment)
     env = static.env
@@ -166,6 +196,7 @@ def _step_call_wrapped(static, combiner, parent):
     return f_eval(env, args.car, next_continuation)
 _STEP_CALL_WRAPPED = PrimitiveOperative(_step_call_wrapped)
 
+@jit.unroll_safe
 def _step_call_evcar(static, value, parent):
     assert isinstance(static, StepEvCarEnvironment)
     env = static.env
@@ -490,12 +521,18 @@ _DEFAULT_ENV = {
     "make-environment": _primitive(1, _operative_make_environment),
     "$define!": _primitive(0, _operative_define),
     "$if": _primitive(0, _operative_if),
+    "jit-loop-head": Combiner(1, _F_LOOP_HEAD),
 }
 
 # == Entry point
 
 def main(argv):
     import os
+    # Configure JIT to allow larger traces
+    jit.set_param(None, "trace_limit", 1000000)
+    jit.set_param(None, "threshold", 131)
+    jit.set_param(None, "trace_eagerness", 50)
+    jit.set_param(None, "max_unroll_loops", 15)
     # Read whole STDIN
     parts = []
     while True:
@@ -522,6 +559,9 @@ def main(argv):
 # RPython toolchain
 def target(driver, args):
     return main, None
+def jitpolicy(driver):
+    from rpython.jit.codewriter.policy import JitPolicy
+    return JitPolicy()
 
 # Python script
 if __name__ == "__main__":
