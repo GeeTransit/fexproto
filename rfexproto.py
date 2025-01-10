@@ -134,14 +134,14 @@ class FDefineEnvironment(Environment):
 # Core interpreter logic
 
 def f_return(parent, obj):
-    return obj, None, parent
+    return None, obj, parent
 def f_eval(env, obj, parent=None):
     return obj, env, parent
 
 def step_evaluate(state):
     obj, env, parent = state
-    if env is None:
-        return parent.operative.call(parent.env, obj, parent.parent)
+    if obj is None:  # env holds the return value (which we shouldn't promote)
+        return parent.operative.call(parent.env, env, parent.parent)
     if isinstance(obj, Symbol):
         assert isinstance(env, Environment)
         while env is not None:
@@ -164,12 +164,12 @@ jitdriver = jit.JitDriver(
 
 def fully_evaluate(state):
     expr, env, continuation = state
-    while continuation is not None or env is not None:
+    while continuation is not None or expr is not None:
         if continuation is not None and continuation.operative is _F_LOOP_HEAD:
             jitdriver.can_enter_jit(expr=expr, env=env, continuation=continuation)
         jitdriver.jit_merge_point(expr=expr, env=env, continuation=continuation)
         expr, env, continuation = step_evaluate((expr, env, continuation))
-    return expr
+    return env
 
 # TODO: Look into how Pycket does runtime call-graph construction to
 # automatically infer loops. See https://doi.org/10.1145/2858949.2784740
