@@ -80,16 +80,17 @@ class StepWrappedEnvironment(Environment):
         self.env = env
         self.args = args
 class StepEvCarEnvironment(Environment):
-    _attrs_ = Environment._attrs_ + ("env", "combiner", "args", "p", "i", "curr_arg")
+    _attrs_ = Environment._attrs_ + ("env", "operative", "num_wraps", "todo", "p", "i", "res")
     _immutable_fields_ = Environment._immutable_fields_
-    def __init__(self, env, combiner, args, p, i, curr_arg):
+    def __init__(self, env, operative, num_wraps, todo, p, i, res):
         Environment.__init__(self, None, None)
         self.env = env
-        self.combiner = combiner
-        self.args = args
+        self.operative = operative
+        self.num_wraps = num_wraps
+        self.todo = todo
         self.p = p
         self.i = i
-        self.curr_arg = curr_arg
+        self.res = res
 class FIfEnvironment(Environment):
     _attrs_ = Environment._attrs_ + ("env", "then", "orelse")
     _immutable_fields_ = Environment._immutable_fields_
@@ -154,11 +155,8 @@ def _step_call_wrapped(static, combiner, parent):
     assert p > 0
     if not isinstance(c, Nil):
         raise RuntimeError("applicative call args must be proper list")
-    c = args; r = s = Pair(NIL, NIL)
-    for _ in range(p): assert isinstance(c, Pair); s.cdr = s = Pair(c.car, NIL); c = c.cdr
-    args = r.cdr
     assert isinstance(args, Pair)
-    next_env = StepEvCarEnvironment(env, combiner, args, p, 0, args)
+    next_env = StepEvCarEnvironment(env, combiner.operative, combiner.num_wraps, args.cdr, p, 0, NIL)
     next_continuation = Continuation(next_env, _STEP_CALL_EVCAR, parent)
     return f_eval(env, args.car, next_continuation)
 _STEP_CALL_WRAPPED = PrimitiveOperative(_step_call_wrapped)
@@ -167,31 +165,33 @@ def _step_call_evcar(static, value, parent):
     assert isinstance(static, StepEvCarEnvironment)
     env = static.env
     assert isinstance(env, Environment)
-    combiner = static.combiner
-    assert isinstance(combiner, Combiner)
+    operative = static.operative
+    assert isinstance(operative, Operative)
+    num_wraps = static.num_wraps
+    assert isinstance(num_wraps, int)
+    todo = static.todo
+    assert todo is NIL or isinstance(todo, Pair)
     p = static.p
     assert isinstance(p, int)
     i = static.i
     assert isinstance(i, int)
-    curr_arg = static.curr_arg
-    assert isinstance(curr_arg, Pair)
-    curr_arg.car = value
+    res = static.res
+    assert res is NIL or isinstance(res, Pair)
+    res = Pair(value, res)
     i = i + 1
-    curr_arg = curr_arg.cdr
     if i == p:
         i = 0
-        combiner = Combiner(combiner.num_wraps - 1, combiner.operative)
-        curr_arg = static.args
-        assert isinstance(curr_arg, Pair)
-        if combiner.num_wraps == 0:
-            continuation = Continuation(env, combiner.operative, parent)
-            return f_return(continuation, curr_arg)
-        static.combiner = combiner
-    static.i = i
-    assert isinstance(curr_arg, Pair)
-    static.curr_arg = curr_arg
-    next_continuation = Continuation(static, _STEP_CALL_EVCAR, parent)
-    return f_eval(env, curr_arg.car, next_continuation)
+        num_wraps = num_wraps - 1
+        assert todo is NIL
+        for _ in range(p): assert isinstance(res, Pair); todo = Pair(res.car, todo); res = res.cdr
+        assert isinstance(todo, Pair)
+        if num_wraps == 0:
+            continuation = Continuation(env, operative, parent)
+            return f_return(continuation, todo)
+    assert isinstance(todo, Pair)
+    next_env = StepEvCarEnvironment(env, operative, num_wraps, todo.cdr, p, i, res)
+    next_continuation = Continuation(next_env, _STEP_CALL_EVCAR, parent)
+    return f_eval(env, todo.car, next_continuation)
 _STEP_CALL_EVCAR = PrimitiveOperative(_step_call_evcar)
 
 # == Lexing, parsing, and writing logic
