@@ -13,11 +13,14 @@ class Boolean(Object):
     def __init__(self, value):
         self.value = value
 class Pair(Object):
-    _attrs_ = ("car", "cdr")
-    _immutable_fields_ = ()
+    _attrs_ = _immutable_fields_ = ("car", "cdr")
     def __init__(self, car, cdr):
         self.car = car
         self.cdr = cdr
+ImmutablePair = Pair
+class MutablePair(Pair):
+    _attrs_ = ("car", "cdr")
+    _immutable_fields_ = ()
 class Int(Object):
     _attrs_ = _immutable_fields_ = ("value",)
     def __init__(self, value):
@@ -65,6 +68,7 @@ class UserDefinedOperative(Operative):
         self.env = env
         self.envname = envname
         self.name = name
+        assert not isinstance(body, MutablePair)
         self.body = body
     def call(self, env, value, parent):
         call_env = Environment({}, self.env)
@@ -245,7 +249,7 @@ def _parse_elements(tokens):
         return element
     element = parse(tokens)
     rest = _parse_elements(tokens)
-    return Pair(element, rest)
+    return ImmutablePair(element, rest)
 
 def _f_write(obj):
     if isinstance(obj, Nil):
@@ -338,7 +342,7 @@ def _operative_cons(env, expr, parent):
     if not isinstance(expr_cdr.cdr, Nil): raise RuntimeError(_ERROR)
     a = expr.car
     b = expr_cdr.car
-    return f_return(parent, Pair(a, b))
+    return f_return(parent, MutablePair(a, b))
 
 # (car pair)
 def _operative_car(env, expr, parent):
