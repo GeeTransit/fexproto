@@ -110,11 +110,14 @@ class FDefineEnvironment(Environment):
 # Core interpreter logic
 
 def f_return(parent, obj):
-    return parent, obj
+    return obj, None, parent
 def f_eval(env, obj, parent=None):
-    return Continuation(env, _STEP_EVAL, parent), obj
+    return obj, env, parent
 
-def _step_eval(env, obj, parent):
+def step_evaluate(state):
+    obj, env, parent = state
+    if env is None:
+        return parent.operative.call(parent.env, obj, parent.parent)
     if isinstance(obj, Symbol):
         assert isinstance(env, Environment)
         while env is not None:
@@ -128,20 +131,12 @@ def _step_eval(env, obj, parent):
         return f_eval(env, obj.car, next_continuation)
     else:
         return f_return(parent, obj)
-_STEP_EVAL = PrimitiveOperative(_step_eval)
-
-def step_evaluate(state):
-    continuation, value = state
-    env = continuation.env
-    operative = continuation.operative
-    parent = continuation.parent
-    return operative.call(env, value, parent)
 
 def fully_evaluate(state):
-    continuation, value = state
-    while continuation is not None:
-        continuation, value = step_evaluate((continuation, value))
-    return value
+    expr, env, continuation = state
+    while continuation is not None or env is not None:
+        expr, env, continuation = step_evaluate((expr, env, continuation))
+    return expr
 
 def _step_call_wrapped(static, combiner, parent):
     assert isinstance(static, StepWrappedEnvironment)
