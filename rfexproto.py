@@ -12,7 +12,15 @@ except ImportError:
         @staticmethod
         def set_param(*args): pass
         @staticmethod
+        def promote(arg): return arg
+        @staticmethod
+        def promote_string(arg): return arg
+        @staticmethod
+        def elidable(func): return func
+        @staticmethod
         def unroll_safe(func): return func
+        @staticmethod
+        def isvirtual(arg): return False
 
 # == Interpreter types and logic
 
@@ -44,11 +52,16 @@ class Symbol(Object):
     def __init__(self, name):
         self.name = name
 class Environment(Object):
-    _attrs_ = _immutable_fields_ = ("bindings", "parent")
+    _attrs_ = _immutable_fields_ = ("storage", "parent", "localmap", "version", "children")
     def __init__(self, bindings, parent):
         assert parent is None or isinstance(parent, Environment)
-        self.bindings = bindings
+        storage, localmap = _environment_tostoragemap(bindings)
+        self.storage = storage
         self.parent = parent
+        self.localmap = localmap
+        self.version = VersionTag()
+        self.children = None
+        _environment_addchild(parent, self)
 class Continuation(Object):
     _attrs_ = _immutable_fields_ = ("env", "operative", "parent")
     def __init__(self, env, operative, parent):
@@ -88,11 +101,124 @@ class UserDefinedOperative(Operative):
         call_env = Environment({}, self.env)
         envname = self.envname
         if isinstance(envname, Symbol):
-            call_env.bindings[envname.name] = env
+            _environment_update(call_env, envname, env)
         name = self.name
         if isinstance(name, Symbol):
-            call_env.bindings[name.name] = env
+            _environment_update(call_env, name, value)
         return f_eval(call_env, self.body, parent)
+
+# Variable lookup and environment versioning
+
+# We assume that most environments assign the same variables in the same order.
+# This lets us optimize local variable lookups to be just an array access. See
+# https://pypy.org/posts/2011/03/controlling-tracing-of-interpreter-with_21-6524148550848694588.html
+class LocalMap(object):
+    _attrs_ = _immutable_fields_ = ("transitions", "indexes")
+    def __init__(self):
+        self.transitions = {}  # str -> LocalMap
+        self.indexes = {}  # str -> int
+    @jit.elidable
+    def find(self, name):
+        return self.indexes.get(name, -1)
+    @jit.elidable
+    def new_localmap_with(self, name):
+        assert isinstance(name, str)
+        if name not in self.transitions:
+            new = LocalMap()
+            new.indexes.update(self.indexes)
+            new.indexes[name] = len(self.indexes)
+            self.transitions[name] = new
+        return self.transitions[name]
+_ROOT_LOCALMAP = LocalMap()
+
+class VersionTag(object):
+    _attrs_ = _immutable_fields_ = ()
+
+@jit.unroll_safe
+def _environment_tostoragemap(bindings):
+    storage = []
+    localmap = _ROOT_LOCALMAP
+    if bindings is not None and len(bindings) > 0:
+        for key, value in bindings.items():  # TODO: should we sort?
+            localmap = localmap.new_localmap_with(key)
+            storage.append(value)
+    return storage, localmap
+
+def _environment_addchild(parent, env):
+    if parent is not None and parent.children is None:
+        # First time the parent environment has a child
+        parent.children = []
+        if parent.parent is not None:
+            # Make grandparent hold weakref to parent. Versions only need to be
+            # updated for environments with children.
+            if parent.parent.children is None:
+                raise RuntimeError("env parent invariant broken?")
+            import weakref
+            parent.parent.children.append(weakref.ref(parent))
+
+def _environment_lookup(env, name):
+    # TODO: which promotes are actually necessary for performance?
+    name_name = name.name
+    if not jit.isvirtual(name_name):
+        jit.promote_string(name_name)
+    if env is None:
+        raise RuntimeError("binding not found", name_name)
+    if not jit.isvirtual(env) and not jit.isvirtual(env.localmap):
+        jit.promote(env.localmap)
+    index = env.localmap.find(name_name)
+    if index >= 0:
+        return env.storage[index]
+    env = env.parent
+    if env is None:
+        raise RuntimeError("binding not found", name_name)
+    if not jit.isvirtual(env):
+        jit.promote(env)
+        if not jit.isvirtual(env.version):
+            jit.promote(env.version)
+    return _environment_lookup_version(env, name_name, env.version)
+
+@jit.elidable
+def _environment_lookup_version(env, name_name, version):
+    while env is not None:
+        index = env.localmap.find(name_name)
+        if index >= 0:
+            return env.storage[index]
+        env = env.parent
+    raise RuntimeError("binding not found", name_name)
+
+def _environment_update(env, name, value):
+    name_name = name.name
+    index = env.localmap.find(name_name)
+    if index >= 0:
+        env.storage[index] = value
+    else:
+        env.localmap = env.localmap.new_localmap_with(name_name)
+        env.storage.append(value)
+    _environment_update_version(env, VersionTag())
+
+@jit.unroll_safe
+def _environment_update_version(env, version):
+    env.version = version
+    if env.children is not None:
+        cleanup = False
+        for child in env.children:
+            child_env = child()
+            if child_env is not None:
+                _environment_update_version(child_env, version)
+            else:
+                cleanup = True
+        if cleanup:
+            i = 0
+            for i in range(len(env.children)):
+                if env.children[i]() is None:
+                    break
+            j = i
+            for i in range(i, len(env.children)):
+                if env.children[i]() is None:
+                    continue
+                env.children[i], env.children[j] = env.children[j], env.children[i]
+                j += 1
+            del env.children[j:]
 
 # Specialized environments
 
@@ -144,11 +270,7 @@ def step_evaluate(state):
         return parent.operative.call(parent.env, env, parent.parent)
     if isinstance(obj, Symbol):
         assert isinstance(env, Environment)
-        while env is not None:
-            if obj.name in env.bindings:
-                return f_return(parent, env.bindings[obj.name])
-            env = env.parent
-        raise RuntimeError("binding not found", obj.name)
+        return f_return(parent, _environment_lookup(env, obj))
     elif isinstance(obj, Pair):
         next_env = StepWrappedEnvironment(env, obj.cdr)
         next_continuation = Continuation(next_env, _STEP_CALL_WRAPPED, parent)
@@ -463,7 +585,7 @@ def _f_define(static, value, parent):
     name = static.name
     assert isinstance(name, Symbol) or isinstance(name, Ignore)
     if isinstance(name, Symbol):
-        env.bindings[name.name] = env
+        _environment_update(env, name, value)
     return f_return(parent, NIL)
 _F_DEFINE = PrimitiveOperative(_f_define)
 def _operative_define(env, expr, parent):
