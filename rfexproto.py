@@ -261,13 +261,19 @@ class FDefineEnvironment(Environment):
 
 def f_return(parent, obj):
     return None, obj, parent
+def f_return_loop_constant(parent, obj):
+    return obj, None, parent
 def f_eval(env, obj, parent=None):
     return obj, env, parent
 
 def step_evaluate(state):
     obj, env, parent = state
-    if obj is None:  # env holds the return value (which we shouldn't promote)
+    # Return values should usually not be promoted (red variables) unless they
+    # are loop constants (green variables).
+    if obj is None:  # normal return
         return parent.operative.call(parent.env, env, parent.parent)
+    if env is None:  # loop constant
+        return parent.operative.call(parent.env, obj, parent.parent)
     if isinstance(obj, Symbol):
         assert isinstance(env, Environment)
         return f_return(parent, _environment_lookup(env, obj))
@@ -286,17 +292,21 @@ jitdriver = jit.JitDriver(
 
 def fully_evaluate(state):
     expr, env, continuation = state
-    while continuation is not None or expr is not None:
-        if continuation is not None and continuation.operative is _F_LOOP_HEAD:
-            jitdriver.can_enter_jit(expr=expr, env=env, continuation=continuation)
+    while continuation is not None or (expr is not None and env is not None):
         jitdriver.jit_merge_point(expr=expr, env=env, continuation=continuation)
         expr, env, continuation = step_evaluate((expr, env, continuation))
-    return env
+        if continuation is not None and continuation.operative is _F_LOOP_CONSTANT:
+            jitdriver.can_enter_jit(expr=expr, env=env, continuation=continuation)
+    return env or expr
 
 # TODO: Look into how Pycket does runtime call-graph construction to
 # automatically infer loops. See https://doi.org/10.1145/2858949.2784740
+def _f_loop_constant(env, expr, parent):
+    return f_return(parent, NIL)
 def _f_loop_head(env, expr, parent):
-    return f_return(parent, expr)
+    next_continuation = Continuation(None, _F_LOOP_CONSTANT, parent)
+    return f_return_loop_constant(next_continuation, expr)
+_F_LOOP_CONSTANT = PrimitiveOperative(_f_loop_constant)
 _F_LOOP_HEAD = PrimitiveOperative(_f_loop_head)
 
 @jit.unroll_safe
@@ -643,7 +653,7 @@ _DEFAULT_ENV = {
     "make-environment": _primitive(1, _operative_make_environment),
     "$define!": _primitive(0, _operative_define),
     "$if": _primitive(0, _operative_if),
-    "jit-loop-head": Combiner(1, _F_LOOP_HEAD),
+    "$jit-loop-head": Combiner(0, _F_LOOP_HEAD),
 }
 
 # == Entry point
