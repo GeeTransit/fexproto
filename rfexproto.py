@@ -256,6 +256,12 @@ class FDefineEnvironment(Environment):
         Environment.__init__(self, None, None)
         self.env = env
         self.name = name
+class FBindsEnvironment(Environment):
+    _attrs_ = Environment._attrs_ + ("name",)
+    _immutable_fields_ = Environment._immutable_fields_
+    def __init__(self, name):
+        Environment.__init__(self, None, None)
+        self.name = name
 
 # Core interpreter logic
 
@@ -637,6 +643,30 @@ def _operative_if(env, expr, parent):
     next_env = FIfEnvironment(env, then, orelse)
     return f_eval(env, cond, Continuation(next_env, _F_IF, parent))
 
+# ($binds? env name)
+def _f_binds(static, value, parent):
+    assert isinstance(static, FBindsEnvironment)
+    name = static.name
+    if not isinstance(value, Environment):
+        raise RuntimeError("expected environment argument value")
+    try:
+        _environment_lookup(value, name)
+    except RuntimeError:
+        return f_return(parent, FALSE)
+    return f_return(parent, TRUE)
+_F_BINDS = PrimitiveOperative(_f_binds)
+def _operative_binds(env, expr, parent):
+    _ERROR = "expected ($binds? ENV SYMBOL)"
+    if not isinstance(expr, Pair): raise RuntimeError(_ERROR)
+    expr_cdr = expr.cdr
+    if not isinstance(expr_cdr, Pair): raise RuntimeError(_ERROR)
+    if not isinstance(expr_cdr.cdr, Nil): raise RuntimeError(_ERROR)
+    env_expr = expr.car
+    name = expr_cdr.car
+    if not isinstance(name, Symbol): raise RuntimeError(_ERROR)
+    next_env = FBindsEnvironment(name)
+    return f_eval(env, env_expr, Continuation(next_env, _F_BINDS, parent))
+
 def _primitive(num_wraps, func):
     return Combiner(num_wraps, PrimitiveOperative(func))
 _DEFAULT_ENV = {
@@ -653,6 +683,7 @@ _DEFAULT_ENV = {
     "make-environment": _primitive(1, _operative_make_environment),
     "$define!": _primitive(0, _operative_define),
     "$if": _primitive(0, _operative_if),
+    "$binds?": _primitive(0, _operative_binds),
     "$jit-loop-head": Combiner(0, _F_LOOP_HEAD),
 }
 
