@@ -376,12 +376,16 @@ def tokenize(text):
     i = 0
     len_text = len(text)
     while True:
-        if i == len_text or text[i] in " \t\r\n()":
+        if i == len_text or text[i] in " \t\r\n();":
             if current:
                 result.append("".join(current))
                 del current[:]
-            if i != len_text and text[i] in "()":
-                result.append(text[i:i+1])
+            if i != len_text:
+                if text[i] in "()":
+                    result.append(text[i:i+1])
+                elif text[i] == ";":  # single-line comments
+                    while i < len_text and text[i] not in "\r\n":
+                        i += 1
         else:
             current.append(text[i])
         if i == len_text:
