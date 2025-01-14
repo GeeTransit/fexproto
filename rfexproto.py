@@ -30,6 +30,8 @@ class Nil(Object):
     _attrs_ = _immutable_fields_ = ()
 class Ignore(Object):
     _attrs_ = _immutable_fields_ = ()
+class Inert(Object):
+    _attrs_ = _immutable_fields_ = ()
 class Boolean(Object):
     _attrs_ = _immutable_fields_ = ("value",)
     def __init__(self, value):
@@ -77,6 +79,7 @@ class Combiner(Object):
         self.operative = operative
 NIL = Nil()
 IGNORE = Ignore()
+INERT = Inert()
 TRUE = Boolean(True)
 FALSE = Boolean(False)
 
@@ -308,7 +311,7 @@ def fully_evaluate(state):
 # TODO: Look into how Pycket does runtime call-graph construction to
 # automatically infer loops. See https://doi.org/10.1145/2858949.2784740
 def _f_loop_constant(env, expr, parent):
-    return f_return(parent, NIL)
+    return f_return(parent, INERT)
 def _f_loop_head(env, expr, parent):
     next_continuation = Continuation(None, _F_LOOP_CONSTANT, parent)
     return f_return_loop_constant(next_continuation, expr)
@@ -404,6 +407,8 @@ def parse(tokens):
         return FALSE
     if token.lower() == "#ignore":
         return IGNORE
+    if token.lower() == "#inert":
+        return INERT
     try:
         return Int(int(token))
     except ValueError:
@@ -433,6 +438,8 @@ def _f_write(obj):
         print(obj.name, end="")
     elif isinstance(obj, Ignore):
         print("#ignore", end="")
+    elif isinstance(obj, Inert):
+        print("#inert", end="")
     elif isinstance(obj, Boolean):
         if obj.value:
             print("#t", end="")
@@ -484,6 +491,8 @@ def _operative_eq(env, expr, parent):
     elif isinstance(a, Nil):
         result = TRUE
     elif isinstance(a, Ignore):
+        result = TRUE
+    elif isinstance(a, Inert):
         result = TRUE
     elif isinstance(a, Boolean):
         assert isinstance(b, Boolean)
@@ -606,7 +615,7 @@ def _f_define(static, value, parent):
     assert isinstance(name, Symbol) or isinstance(name, Ignore)
     if isinstance(name, Symbol):
         _environment_update(env, name, value)
-    return f_return(parent, NIL)
+    return f_return(parent, INERT)
 _F_DEFINE = PrimitiveOperative(_f_define)
 def _operative_define(env, expr, parent):
     _ERROR = "expected ($define! PARAM ANY)"
@@ -719,8 +728,9 @@ def main(argv):
     for expr in exprs:
         state = f_eval(env, expr)
         value = fully_evaluate(state)
-        _f_write(value)
-        print()
+        if not isinstance(value, Inert):
+            _f_write(value)
+            print()
     return 0
 
 # RPython toolchain
