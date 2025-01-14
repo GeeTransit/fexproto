@@ -592,6 +592,11 @@ def _operative_eval(env, expr, parent):
     environment = expr.car
     if not isinstance(environment, Environment): raise RuntimeError(_ERROR)
     expression = expr_cdr.car
+    # Special-case operative calls to not let the JIT driver promote the pair
+    if isinstance(expression, Pair):
+        combiner = expression.car
+        if isinstance(combiner, Combiner) and combiner.num_wraps == 0:
+            return combiner.operative.call(environment, expression.cdr, parent)
     return f_eval(environment, expression, parent)
 
 # (make-environment [parent])
