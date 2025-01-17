@@ -373,34 +373,52 @@ _STEP_CALL_EVCAR = PrimitiveOperative(_step_call_evcar)
 
 # == Lexing, parsing, and writing logic
 
-def tokenize(text):
+def tokenize(text, offsets=None):
     current = []
     result = []
     i = 0
     len_text = len(text)
+    line_no = 0
+    line_start_i = 0
     while True:
         if i == len_text or text[i] in " \t\r\n();":
             if current:
                 result.append("".join(current))
+                if offsets is not None:
+                    offsets.append(line_no)
+                    offsets.append(i - line_start_i - len(current))
                 del current[:]
             if i != len_text:
                 if text[i] in "()":
                     result.append(text[i:i+1])
+                    if offsets is not None:
+                        offsets.append(line_no)
+                        offsets.append(i - line_start_i)
                 elif text[i] == ";":  # single-line comments
                     while i < len_text and text[i] not in "\r\n":
                         i += 1
+                if i < len_text and text[i] == "\n":
+                    line_no += 1
+                    line_start_i = i + 1
         else:
             current.append(text[i])
         if i == len_text:
             return result
         i += 1
 
-def parse(tokens):
+def parse(tokens, offsets=None, locations=None):
     token = tokens.pop()
+    line_no = offsets.pop() if offsets is not None else -1
+    char_no = offsets.pop() if offsets is not None else -1
     if token == ")":
         raise RuntimeError("unmatched close bracket")
     if token == "(":
-        return _parse_elements(tokens)
+        expr, _, _ = _parse_elements(
+            tokens,
+            offsets=offsets, locations=locations,
+            line_no=line_no, char_no=char_no,
+        )
+        return expr
     if token == "#t" or token == "#T":
         return TRUE
     if token == "#f" or token == "#F":
@@ -414,20 +432,40 @@ def parse(tokens):
     except ValueError:
         return Symbol(token.lower())
 
-def _parse_elements(tokens):
+def _parse_elements(
+    tokens,
+    offsets=None, locations=None,
+    line_no=-1, char_no=-1,
+):
     token = tokens[-1]
     if token == ")":
         tokens.pop()
-        return NIL
+        end_line_no = offsets.pop() if offsets is not None else -1
+        end_char_no = offsets.pop() if offsets is not None else -1
+        return NIL, end_line_no, end_char_no
     if token == ".":
         tokens.pop()
+        if offsets is not None:
+            offsets.pop()
+            offsets.pop()
         assert tokens[-1] != ")"
-        element = parse(tokens)
+        element = parse(tokens, offsets=offsets, locations=locations)
         assert tokens.pop() == ")"
-        return element
-    element = parse(tokens)
-    rest = _parse_elements(tokens)
-    return ImmutablePair(element, rest)
+        end_line_no = offsets.pop() if offsets is not None else -1
+        end_char_no = offsets.pop() if offsets is not None else -1
+        return element, end_line_no, end_char_no
+    element = parse(tokens, offsets=offsets, locations=locations)
+    next_line_no = offsets[-1] if offsets is not None else -1
+    next_char_no = offsets[-2] if offsets is not None else -1
+    rest, end_line_no, end_char_no = _parse_elements(
+        tokens,
+        offsets=offsets, locations=locations,
+        line_no=next_line_no, char_no=next_char_no,
+    )
+    pair = ImmutablePair(element, rest)
+    if locations is not None:
+        locations.append((pair, line_no, char_no, end_line_no, end_char_no + 1))
+    return pair, end_line_no, end_char_no
 
 def _f_write(obj):
     if isinstance(obj, Nil):
@@ -722,11 +760,14 @@ def main(argv):
         parts.append(part)
     text = "".join(parts)
     # Lex and parse
-    tokens = tokenize(text)
+    offsets = []
+    tokens = tokenize(text, offsets=offsets)
     tokens.reverse()
+    offsets.reverse()
     exprs = []
+    locations = []
     while tokens:
-        exprs.append(parse(tokens))
+        exprs.append(parse(tokens, offsets=offsets, locations=locations))
     # Setup standard environment
     env = Environment({}, Environment(_DEFAULT_ENV, None))
     # Evaluate expressions and write their results
