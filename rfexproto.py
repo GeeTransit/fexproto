@@ -121,6 +121,16 @@ class UserDefinedOperative(Operative):
             _environment_update(call_env, name, value)
         return f_eval(call_env, self.body, parent)
 
+# Exceptions
+
+class ParsingError(Exception):
+    def __init__(self, message, line_no, char_no):
+        self.message = message
+        # Note that line_no and char_no must be on the exception instance since
+        # unlike internal errors, there is no "source expression" to locate.
+        self.line_no = line_no
+        self.char_no = char_no
+
 # Variable lookup and environment versioning
 
 # We assume that most environments assign the same variables in the same order.
@@ -402,7 +412,7 @@ def tokenize(text, offsets=None):
     while i < len_text:
         match = _TOKEN_PATTERN.match(text, i)
         if match is None:
-            raise RuntimeError("unknown syntax")
+            raise ParsingError("unknown syntax", line_no, i - line_start_i)
         token = match.group()
         if token == "\n":
             line_no += 1
@@ -420,7 +430,7 @@ def parse(tokens, offsets=None, locations=None):
     line_no = offsets.pop() if offsets is not None else -1
     char_no = offsets.pop() if offsets is not None else -1
     if token == ")":
-        raise RuntimeError("unmatched close bracket")
+        raise ParsingError("unmatched close bracket", line_no, char_no)
     if token == "(":
         expr, _, _ = _parse_elements(
             tokens,
@@ -440,7 +450,7 @@ def parse(tokens, offsets=None, locations=None):
         return Int(int(token))
     if token[0] != "#":
         return Symbol(token.lower())
-    raise RuntimeError("unknown token")
+    raise ParsingError("unknown token", line_no, char_no)
 
 def _parse_elements(
     tokens,
@@ -458,11 +468,15 @@ def _parse_elements(
         if offsets is not None:
             offsets.pop()
             offsets.pop()
-        assert tokens[-1] != ")"
+        if tokens[-1] == ")":
+            line_no = offsets[-1] if offsets is not None else -1
+            char_no = offsets[-2] if offsets is not None else -1
+            raise ParsingError("unexpected close bracket", line_no, char_no)
         element = parse(tokens, offsets=offsets, locations=locations)
-        assert tokens.pop() == ")"
         end_line_no = offsets.pop() if offsets is not None else -1
         end_char_no = offsets.pop() if offsets is not None else -1
+        if tokens.pop() != ")":
+            raise ParsingError("expected close bracket", end_line_no, end_char_no)
         return element, end_line_no, end_char_no
     element = parse(tokens, offsets=offsets, locations=locations)
     next_line_no = offsets[-1] if offsets is not None else -1
@@ -770,14 +784,22 @@ def main(argv):
         parts.append(part)
     text = "".join(parts)
     # Lex and parse
-    offsets = []
-    tokens = tokenize(text, offsets=offsets)
-    tokens.reverse()
-    offsets.reverse()
-    exprs = []
-    locations = []
-    while tokens:
-        exprs.append(parse(tokens, offsets=offsets, locations=locations))
+    try:
+        offsets = []
+        tokens = tokenize(text, offsets=offsets)
+        tokens.reverse()
+        offsets.reverse()
+        exprs = []
+        locations = []
+        while tokens:
+            exprs.append(parse(tokens, offsets=offsets, locations=locations))
+    except ParsingError as e:
+        print("! --- syntax error ---")
+        print("  in <stdin> at %d [%d:]" % (e.line_no + 1, e.char_no + 1))
+        print("    ", end="")
+        print(text.split("\n")[e.line_no])
+        print('! syntax-error "%s"' % (e.message,))
+        return 1
     # Setup standard environment
     env = Environment({}, Environment(_DEFAULT_ENV, None))
     # Evaluate expressions and write their results
