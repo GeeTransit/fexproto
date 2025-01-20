@@ -78,7 +78,7 @@ class Environment(Object):
         _environment_addchild(parent, self)
 class Continuation(Object):
     _immutable_fields_ = ("env", "operative", "parent")
-    _attrs_ = _immutable_fields_ + ("_should_enter",)
+    _attrs_ = _immutable_fields_ + ("_should_enter", "_call_info")
     def __init__(self, env, operative, parent):
         assert env is None or isinstance(env, Environment)
         assert isinstance(operative, Operative)
@@ -87,6 +87,7 @@ class Continuation(Object):
         self.operative = operative
         self.parent = parent
         self._should_enter = False
+        self._call_info = None
 class Combiner(Object):
     _attrs_ = _immutable_fields_ = ("num_wraps", "operative")
     def __init__(self, num_wraps, operative):
@@ -131,6 +132,10 @@ class UserDefinedOperative(Operative):
             _environment_update(call_env, name, value)
         return f_eval(call_env, self.body, parent)
 
+def _f_noop(env, expr, parent):
+    return f_return(parent, expr)
+NOOP = PrimitiveOperative(_f_noop)
+
 # Exceptions
 
 class ParsingError(Exception):
@@ -146,11 +151,16 @@ class RuntimeError(OldRuntimeError):
         # RPython exception instances don't have .message
         self.message = message
 class EvaluationError(Exception):
-    def __init__(self, value):
+    def __init__(self, value, parent=None):
         # Actual exception which stops the evaluation loop
         self.value = value
+        self.parent = parent
 
 def _f_error_cont(env, expr, parent):
+    if isinstance(expr, Pair):
+        original_parent = expr.car
+        if isinstance(original_parent, Continuation):
+            raise EvaluationError(expr.cdr, original_parent)
     raise EvaluationError(expr)
 ERROR_CONT = Continuation(None, PrimitiveOperative(_f_error_cont), None)
 
@@ -318,7 +328,7 @@ def f_return_loop_constant(parent, obj):
     return obj, None, parent
 def f_error(parent, value):
     # TODO: replace with abnormal pass when guarded continuations implemented
-    return f_return(ERROR_CONT, value)
+    return f_return(ERROR_CONT, MutablePair(parent, value))
 def f_eval(env, obj, parent=None):
     return obj, env, parent
 
@@ -341,6 +351,7 @@ def step_evaluate(state):
     elif isinstance(obj, Pair):
         next_env = StepWrappedEnvironment(env, obj.cdr)
         next_continuation = Continuation(next_env, _STEP_CALL_WRAPPED, parent)
+        next_continuation._call_info = obj.car
         return f_eval(env, obj.car, next_continuation)
     else:
         return f_return(parent, obj)
@@ -387,6 +398,7 @@ def _step_call_wrapped(static, combiner, parent):
     assert isinstance(args, Pair)
     next_env = StepEvCarEnvironment(env, combiner.operative, combiner.num_wraps, args.cdr, p, 0, NIL)
     next_continuation = Continuation(next_env, _STEP_CALL_EVCAR, parent)
+    next_continuation._call_info = args.car
     return f_eval(env, args.car, next_continuation)
 _STEP_CALL_WRAPPED = PrimitiveOperative(_step_call_wrapped)
 
@@ -421,6 +433,7 @@ def _step_call_evcar(static, value, parent):
     assert isinstance(todo, Pair)
     next_env = StepEvCarEnvironment(env, operative, num_wraps, todo.cdr, p, i, res)
     next_continuation = Continuation(next_env, _STEP_CALL_EVCAR, parent)
+    next_continuation._call_info = todo.car
     return f_eval(env, todo.car, next_continuation)
 _STEP_CALL_EVCAR = PrimitiveOperative(_step_call_evcar)
 
@@ -586,6 +599,38 @@ def _f_write(obj):
         print(")", end="")
     else:
         print("#unknown", end="")
+
+def _f_print_trace(continuation, sources=None):
+    assert isinstance(continuation, Continuation)
+    # Output stack trace in reverse order, with recent calls last
+    frames = []
+    while continuation is not None:
+        frames.append(continuation)
+        continuation = continuation.parent
+    while frames:
+        continuation = frames.pop()
+        # Skip helper frames (part of argument evaluation)
+        if continuation._call_info is None:
+            continue
+        expr = continuation._call_info
+        if expr not in sources:
+            # Non-source expressions can be evaluated, usually from eval
+            print("  in unknown")
+            print("    ", end="")
+            _f_write(expr)
+            print()
+            continue
+        # Get source location of expression
+        filename, start_line_no, start_char_no, end_line_no, end_char_no = sources[expr]
+        if start_line_no == end_line_no:
+            line_info = "%d" % (start_line_no+1,)
+        else:
+            line_info = "%d:%d" % (start_line_no+1, end_line_no+1)
+        print("  in %s at %s [%d:%d]" % (filename, line_info, start_char_no+1, end_char_no+1))
+        # TODO: output the actual content of the lines the expression is from
+        print("    ", end="")
+        _f_write(expr)
+        print()
 
 # == Primitive combiners
 
@@ -761,7 +806,9 @@ def _operative_define(env, expr, parent):
     if not isinstance(name, Symbol) and not isinstance(name, Ignore): raise RuntimeError(_ERROR)
     value = expr_cdr.car
     next_env = FDefineEnvironment(env, name)
-    return f_eval(env, value, Continuation(next_env, _F_DEFINE, parent))
+    next_continuation = Continuation(next_env, _F_DEFINE, parent)
+    next_continuation._call_info = value
+    return f_eval(env, value, next_continuation)
 
 # ($if cond then orelse)
 def _f_if(static, result, parent):
@@ -788,7 +835,9 @@ def _operative_if(env, expr, parent):
     then = expr_cdr.car
     orelse = expr_cdr_cdr.car
     next_env = FIfEnvironment(env, then, orelse)
-    return f_eval(env, cond, Continuation(next_env, _F_IF, parent))
+    next_continuation = Continuation(next_env, _F_IF, parent)
+    next_continuation._call_info = cond
+    return f_eval(env, cond, next_continuation)
 
 # ($binds? env name)
 def _f_binds(static, value, parent):
@@ -811,7 +860,9 @@ def _operative_binds(env, expr, parent):
     name = expr_cdr.car
     if not isinstance(name, Symbol): raise RuntimeError(_ERROR)
     next_env = FBindsEnvironment(name)
-    return f_eval(env, env_expr, Continuation(next_env, _F_BINDS, parent))
+    next_continuation = Continuation(next_env, _F_BINDS, parent)
+    next_continuation._call_info = env_expr
+    return f_eval(env, env_expr, next_continuation)
 
 def _primitive(num_wraps, func):
     return Combiner(num_wraps, PrimitiveOperative(func))
@@ -872,13 +923,21 @@ def main(argv):
     env = Environment({}, Environment(_DEFAULT_ENV, None))
     # Evaluate expressions and write their results
     for expr in exprs:
-        state = f_eval(env, expr)
+        parent = Continuation(None, NOOP, None)
+        parent._call_info = expr
+        state = f_eval(env, expr, parent)
         try:
             value = fully_evaluate(state)
             if not isinstance(value, Inert):
                 _f_write(value)
                 print()
         except EvaluationError as e:
+            if e.parent is not None:
+                print("! --- stack trace ---")
+                sources = {}
+                for expr, l1, c1, l2, c2 in locations:
+                    sources[expr] = ("<stdin>", l1, c1, l2, c2)
+                _f_print_trace(e.parent, sources=sources)
             print("! error ", end="")
             _f_write(e.value)
             print()
