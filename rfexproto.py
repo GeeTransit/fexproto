@@ -77,7 +77,8 @@ class Environment(Object):
         self.children = None
         _environment_addchild(parent, self)
 class Continuation(Object):
-    _attrs_ = _immutable_fields_ = ("env", "operative", "parent")
+    _immutable_fields_ = ("env", "operative", "parent")
+    _attrs_ = _immutable_fields_ + ("_should_enter",)
     def __init__(self, env, operative, parent):
         assert env is None or isinstance(env, Environment)
         assert isinstance(operative, Operative)
@@ -85,6 +86,7 @@ class Continuation(Object):
         self.env = env
         self.operative = operative
         self.parent = parent
+        self._should_enter = False
 class Combiner(Object):
     _attrs_ = _immutable_fields_ = ("num_wraps", "operative")
     def __init__(self, num_wraps, operative):
@@ -335,7 +337,7 @@ def fully_evaluate(state):
     while continuation is not None or (expr is not None and env is not None):
         jitdriver.jit_merge_point(expr=expr, env=env, continuation=continuation)
         expr, env, continuation = step_evaluate((expr, env, continuation))
-        if continuation is not None and continuation.operative is _F_LOOP_CONSTANT:
+        if continuation is not None and continuation._should_enter:
             jitdriver.can_enter_jit(expr=expr, env=env, continuation=continuation)
     return env or expr
 
@@ -345,6 +347,7 @@ def _f_loop_constant(env, expr, parent):
     return f_return(parent, INERT)
 def _f_loop_head(env, expr, parent):
     next_continuation = Continuation(None, _F_LOOP_CONSTANT, parent)
+    next_continuation._should_enter = True
     return f_return_loop_constant(next_continuation, expr)
 _F_LOOP_CONSTANT = PrimitiveOperative(_f_loop_constant)
 _F_LOOP_HEAD = PrimitiveOperative(_f_loop_head)
