@@ -35,10 +35,13 @@ class Inert(Object):
 class Boolean(Object):
     _attrs_ = _immutable_fields_ = ("value",)
     def __init__(self, value):
+        assert isinstance(value, bool)
         self.value = value
 class Pair(Object):
     _attrs_ = _immutable_fields_ = ("car", "cdr")
     def __init__(self, car, cdr):
+        assert isinstance(car, Object)
+        assert isinstance(cdr, Object)
         self.car = car
         self.cdr = cdr
 ImmutablePair = Pair
@@ -48,10 +51,12 @@ class MutablePair(Pair):
 class Int(Object):
     _attrs_ = _immutable_fields_ = ("value",)
     def __init__(self, value):
+        assert isinstance(value, int)
         self.value = value
 class Symbol(Object):
     _attrs_ = _immutable_fields_ = ("name",)
     def __init__(self, name):
+        assert isinstance(name, str)
         self.name = name
 class Environment(Object):
     _attrs_ = _immutable_fields_ = ("storage", "parent", "localmap", "version", "children")
@@ -68,6 +73,7 @@ class Continuation(Object):
     _attrs_ = _immutable_fields_ = ("env", "operative", "parent")
     def __init__(self, env, operative, parent):
         assert env is None or isinstance(env, Environment)
+        assert isinstance(operative, Operative)
         assert parent is None or isinstance(parent, Continuation)
         self.env = env
         self.operative = operative
@@ -95,8 +101,11 @@ class PrimitiveOperative(Operative):
 class UserDefinedOperative(Operative):
     _immutable_ = True
     def __init__(self, env, envname, name, body):
+        assert env is None or isinstance(env, Environment)
         self.env = env
+        assert isinstance(envname, Symbol) or isinstance(envname, Ignore)
         self.envname = envname
+        assert isinstance(name, Symbol) or isinstance(name, Ignore)
         self.name = name
         assert not isinstance(body, MutablePair)
         self.body = body
@@ -280,8 +289,10 @@ def step_evaluate(state):
     # Return values should usually not be promoted (red variables) unless they
     # are loop constants (green variables).
     if obj is None:  # normal return
+        assert env is not None
         return parent.operative.call(parent.env, env, parent.parent)
     if env is None:  # loop constant
+        assert obj is not None
         return parent.operative.call(parent.env, obj, parent.parent)
     if isinstance(obj, Symbol):
         assert isinstance(env, Environment)
