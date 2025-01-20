@@ -515,7 +515,10 @@ def parse(tokens, offsets=None, locations=None):
     if token[0].isdigit() or token[0] in "+-" and len(token) > 1 and token[1].isdigit():
         return Int(int(token))
     if token[0] != "#":
-        return Symbol(token.lower())
+        symbol = Symbol(token.lower())
+        if locations is not None:
+            locations.append((symbol, line_no, char_no, line_no, char_no + len(token)))
+        return symbol
     raise ParsingError("unknown token", line_no, char_no)
 
 def _parse_elements(
