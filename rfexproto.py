@@ -106,7 +106,10 @@ class PrimitiveOperative(Operative):
     def __init__(self, func):
         self.func = func
     def call(self, env, value, parent):
-        return self.func(env, value, parent)
+        try:
+            return self.func(env, value, parent)
+        except RuntimeError as e:
+            return f_error(parent, MutablePair(String(e.message), NIL))
 class UserDefinedOperative(Operative):
     _immutable_ = True
     def __init__(self, env, envname, name, body):
@@ -137,6 +140,19 @@ class ParsingError(Exception):
         # unlike internal errors, there is no "source expression" to locate.
         self.line_no = line_no
         self.char_no = char_no
+OldRuntimeError = RuntimeError
+class RuntimeError(OldRuntimeError):
+    def __init__(self, message):
+        # RPython exception instances don't have .message
+        self.message = message
+class EvaluationError(Exception):
+    def __init__(self, value):
+        # Actual exception which stops the evaluation loop
+        self.value = value
+
+def _f_error_cont(env, expr, parent):
+    raise EvaluationError(expr)
+ERROR_CONT = Continuation(None, PrimitiveOperative(_f_error_cont), None)
 
 # Variable lookup and environment versioning
 
@@ -300,6 +316,9 @@ def f_return(parent, obj):
     return None, obj, parent
 def f_return_loop_constant(parent, obj):
     return obj, None, parent
+def f_error(parent, value):
+    # TODO: replace with abnormal pass when guarded continuations implemented
+    return f_return(ERROR_CONT, value)
 def f_eval(env, obj, parent=None):
     return obj, env, parent
 
@@ -317,7 +336,7 @@ def step_evaluate(state):
         assert isinstance(env, Environment)
         value = _environment_lookup(env, obj)
         if value is None:
-            raise RuntimeError("binding not found", obj.name)
+            return f_error(parent, MutablePair(String("binding not found"), MutablePair(obj, NIL)))
         return f_return(parent, value)
     elif isinstance(obj, Pair):
         next_env = StepWrappedEnvironment(env, obj.cdr)
@@ -854,10 +873,16 @@ def main(argv):
     # Evaluate expressions and write their results
     for expr in exprs:
         state = f_eval(env, expr)
-        value = fully_evaluate(state)
-        if not isinstance(value, Inert):
-            _f_write(value)
+        try:
+            value = fully_evaluate(state)
+            if not isinstance(value, Inert):
+                _f_write(value)
+                print()
+        except EvaluationError as e:
+            print("! error ", end="")
+            _f_write(e.value)
             print()
+            return 1
     return 0
 
 # RPython toolchain
