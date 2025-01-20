@@ -2,8 +2,10 @@ from __future__ import print_function
 
 # Optional RPython imports
 try:
+    from rpython.rlib.rsre import rsre_re as re
     from rpython.rlib import jit
 except ImportError:
+    import re
     class jit(object):
         class JitDriver(object):
             def __init__(self, **kwargs): pass
@@ -384,38 +386,34 @@ _STEP_CALL_EVCAR = PrimitiveOperative(_step_call_evcar)
 
 # == Lexing, parsing, and writing logic
 
+_TOKEN_PATTERN = re.compile("|".join([
+    r'[()]',  # open and close brackets
+    r'[^ \t\r\n();"]+',  # symbol-like tokens
+    r'[ \t\r]+',  # horizontal whitespace
+    r'\n',  # newline (parsed separately to count lines)
+    r';[^\r\n]*',  # single-line comments
+]))
 def tokenize(text, offsets=None):
-    current = []
     result = []
     i = 0
     len_text = len(text)
     line_no = 0
     line_start_i = 0
-    while True:
-        if i == len_text or text[i] in " \t\r\n();":
-            if current:
-                result.append("".join(current))
-                if offsets is not None:
-                    offsets.append(line_no)
-                    offsets.append(i - line_start_i - len(current))
-                del current[:]
-            if i != len_text:
-                if text[i] in "()":
-                    result.append(text[i:i+1])
-                    if offsets is not None:
-                        offsets.append(line_no)
-                        offsets.append(i - line_start_i)
-                elif text[i] == ";":  # single-line comments
-                    while i < len_text and text[i] not in "\r\n":
-                        i += 1
-                if i < len_text and text[i] == "\n":
-                    line_no += 1
-                    line_start_i = i + 1
-        else:
-            current.append(text[i])
-        if i == len_text:
-            return result
-        i += 1
+    while i < len_text:
+        match = _TOKEN_PATTERN.match(text, i)
+        if match is None:
+            raise RuntimeError("unknown syntax")
+        token = match.group()
+        if token == "\n":
+            line_no += 1
+            line_start_i = i + 1
+        elif token[0] not in " \t\r;":
+            result.append(token)
+            if offsets is not None:
+                offsets.append(line_no)
+                offsets.append(i - line_start_i)
+        i = match.end()
+    return result
 
 def parse(tokens, offsets=None, locations=None):
     token = tokens.pop()
@@ -438,10 +436,11 @@ def parse(tokens, offsets=None, locations=None):
         return IGNORE
     if token.lower() == "#inert":
         return INERT
-    try:
+    if token[0].isdigit() or token[0] in "+-" and len(token) > 1 and token[1].isdigit():
         return Int(int(token))
-    except ValueError:
+    if token[0] != "#":
         return Symbol(token.lower())
+    raise RuntimeError("unknown token")
 
 def _parse_elements(
     tokens,
