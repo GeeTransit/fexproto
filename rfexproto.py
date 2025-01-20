@@ -191,7 +191,7 @@ def _environment_lookup(env, name):
     if not jit.isvirtual(name_name):
         jit.promote_string(name_name)
     if env is None:
-        raise RuntimeError("binding not found", name_name)
+        return None
     if not jit.isvirtual(env) and not jit.isvirtual(env.localmap):
         jit.promote(env.localmap)
     index = env.localmap.find(name_name)
@@ -199,7 +199,7 @@ def _environment_lookup(env, name):
         return env.storage[index]
     env = env.parent
     if env is None:
-        raise RuntimeError("binding not found", name_name)
+        return None
     if not jit.isvirtual(env):
         jit.promote(env)
         if not jit.isvirtual(env.version):
@@ -213,7 +213,7 @@ def _environment_lookup_version(env, name_name, version):
         if index >= 0:
             return env.storage[index]
         env = env.parent
-    raise RuntimeError("binding not found", name_name)
+    return None
 
 def _environment_update(env, name, value):
     name_name = name.name
@@ -313,7 +313,10 @@ def step_evaluate(state):
         return parent.operative.call(parent.env, obj, parent.parent)
     if isinstance(obj, Symbol):
         assert isinstance(env, Environment)
-        return f_return(parent, _environment_lookup(env, obj))
+        value = _environment_lookup(env, obj)
+        if value is None:
+            raise RuntimeError("binding not found", obj.name)
+        return f_return(parent, value)
     elif isinstance(obj, Pair):
         next_env = StepWrappedEnvironment(env, obj.cdr)
         next_continuation = Continuation(next_env, _STEP_CALL_WRAPPED, parent)
@@ -771,9 +774,8 @@ def _f_binds(static, value, parent):
     name = static.name
     if not isinstance(value, Environment):
         raise RuntimeError("expected environment argument value")
-    try:
-        _environment_lookup(value, name)
-    except RuntimeError:
+    found = _environment_lookup(value, name)
+    if found is None:
         return f_return(parent, FALSE)
     return f_return(parent, TRUE)
 _F_BINDS = PrimitiveOperative(_f_binds)
