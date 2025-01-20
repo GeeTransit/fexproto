@@ -55,6 +55,11 @@ class Int(Object):
     def __init__(self, value):
         assert isinstance(value, int)
         self.value = value
+class String(Object):
+    _attrs_ = _immutable_fields_ = ("value",)
+    def __init__(self, value):
+        assert isinstance(value, str)
+        self.value = value
 class Symbol(Object):
     _attrs_ = _immutable_fields_ = ("name",)
     def __init__(self, name):
@@ -399,6 +404,7 @@ _STEP_CALL_EVCAR = PrimitiveOperative(_step_call_evcar)
 _TOKEN_PATTERN = re.compile("|".join([
     r'[()]',  # open and close brackets
     r'[^ \t\r\n();"]+',  # symbol-like tokens
+    r'"(?:[^"\\\r\n]|\\[^\r\n])*"',  # single-line strings
     r'[ \t\r]+',  # horizontal whitespace
     r'\n',  # newline (parsed separately to count lines)
     r';[^\r\n]*',  # single-line comments
@@ -425,6 +431,11 @@ def tokenize(text, offsets=None):
         i = match.end()
     return result
 
+_STRING_PATTERN = re.compile("|".join([
+    r'[^\\]',  # normal characters
+    r'\\x[a-fA-F0-9][a-fA-F0-9]',  # hex escape sequence
+    r'\\[abtnr"\\]',  # common escape sequences
+]))
 def parse(tokens, offsets=None, locations=None):
     token = tokens.pop()
     line_no = offsets.pop() if offsets is not None else -1
@@ -446,6 +457,23 @@ def parse(tokens, offsets=None, locations=None):
         return IGNORE
     if token.lower() == "#inert":
         return INERT
+    if token[0] == '"':
+        i = 1
+        len_token = len(token) - 1
+        chars = []
+        while i < len_token:
+            match = _STRING_PATTERN.match(token, i)
+            if match is None:
+                raise ParsingError("unknown string escape", line_no, char_no + i)
+            part = match.group()
+            if part[0] != "\\":
+                chars.append(part[0])
+            elif part[1] == "x":
+                chars.append(chr(int(part[2]+part[3], 16)))
+            else:
+                chars.append('\a\b\t\n\r"\\'['abtnr"\\'.find(part[1])])
+            i = match.end()
+        return String("".join(chars))
     if token[0].isdigit() or token[0] in "+-" and len(token) > 1 and token[1].isdigit():
         return Int(int(token))
     if token[0] != "#":
@@ -496,6 +524,17 @@ def _f_write(obj):
         print("()", end="")
     elif isinstance(obj, Int):
         print(str(obj.value), end="")
+    elif isinstance(obj, String):
+        print('"', end="")
+        for char in obj.value:
+            code = ord(char)
+            if char in '\a\b\t\n\r"\\':  # escape sequences
+                print("\\"+'abtnr"\\'['\a\b\t\n\r"\\'.find(char)], end="")
+            elif not 32 <= code < 128:  # unprintable codes
+                print("\\x"+"0123456789abcdef"[code//16]+"0123456789abcdef"[code%16], end="")
+            else:
+                print(char, end="")
+        print('"', end="")
     elif isinstance(obj, Symbol):
         print(obj.name, end="")
     elif isinstance(obj, Ignore):
@@ -565,6 +604,9 @@ def _operative_eq(env, expr, parent):
     elif isinstance(a, Symbol):
         assert isinstance(b, Symbol)
         result = TRUE if a.name == b.name else FALSE
+    elif isinstance(a, String):
+        assert isinstance(b, String)
+        result = TRUE if a.value == b.value else FALSE
     else:
         result = TRUE if a is b else FALSE
     return f_return(parent, result)
@@ -798,7 +840,9 @@ def main(argv):
         print("  in <stdin> at %d [%d:]" % (e.line_no + 1, e.char_no + 1))
         print("    ", end="")
         print(text.split("\n")[e.line_no])
-        print('! syntax-error "%s"' % (e.message,))
+        print("! syntax-error ", end="")
+        _f_write(String(e.message))
+        print()
         return 1
     # Setup standard environment
     env = Environment({}, Environment(_DEFAULT_ENV, None))
