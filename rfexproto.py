@@ -4,6 +4,7 @@ from __future__ import print_function
 try:
     from rpython.rlib.rsre import rsre_re as re
     from rpython.rlib import jit
+    from rpython.rlib import objectmodel
 except ImportError:
     import re
     class jit(object):
@@ -23,6 +24,10 @@ except ImportError:
         def unroll_safe(func): return func
         @staticmethod
         def isvirtual(arg): return False
+    class objectmodel(object):
+        class specialize(object):
+            @staticmethod
+            def call_location(): return lambda func: func
 
 # == Interpreter types and logic
 
@@ -646,29 +651,42 @@ def _f_print_trace(continuation, sources=None):
 
 # == Primitive combiners
 
+# Pair unpacking helper functions (must specialize on call site since the
+# return type differs based on rest=True/False.
+@objectmodel.specialize.call_location()
+def _unpack1(expr, message, rest=False):
+    if not isinstance(expr, Pair): raise RuntimeError(message)
+    if rest: return expr.car, expr.cdr
+    if not isinstance(expr.cdr, Nil): raise RuntimeError(message)
+    return expr.car
+@objectmodel.specialize.call_location()
+def _unpack2(expr, message, rest=False):
+    arg1, expr = _unpack1(expr, message, rest=True)
+    arg2, expr = _unpack1(expr, message, rest=True)
+    if rest: return arg1, arg2, expr
+    if not isinstance(expr, Nil): raise RuntimeError(message)
+    return arg1, arg2
+@objectmodel.specialize.call_location()
+def _unpack3(expr, message, rest=False):
+    arg1, expr = _unpack1(expr, message, rest=True)
+    arg2, expr = _unpack1(expr, message, rest=True)
+    arg3, expr = _unpack1(expr, message, rest=True)
+    if rest: return arg1, arg2, arg3, expr
+    if not isinstance(expr, Nil): raise RuntimeError(message)
+    return arg1, arg2, arg3
+
 # (+ a b)
 def _operative_plus(env, expr, parent):
     _ERROR = "expected (+ INT INT)"
-    if not isinstance(expr, Pair): raise RuntimeError(_ERROR)
-    expr_cdr = expr.cdr
-    if not isinstance(expr_cdr, Pair): raise RuntimeError(_ERROR)
-    expr_cdr_cdr = expr_cdr.cdr
-    if not isinstance(expr_cdr_cdr, Nil): raise RuntimeError(_ERROR)
-    a = expr.car
+    a, b = _unpack2(expr, _ERROR)
     if not isinstance(a, Int): raise RuntimeError(_ERROR)
-    b = expr_cdr.car
     if not isinstance(b, Int): raise RuntimeError(_ERROR)
     return f_return(parent, Int(a.value + b.value))
 
 # (eq? a b)
 def _operative_eq(env, expr, parent):
     _ERROR = "expected (eq? ANY ANY)"
-    if not isinstance(expr, Pair): raise RuntimeError(_ERROR)
-    expr_cdr = expr.cdr
-    if not isinstance(expr_cdr, Pair): raise RuntimeError(_ERROR)
-    if not isinstance(expr_cdr.cdr, Nil): raise RuntimeError(_ERROR)
-    a = expr.car
-    b = expr_cdr.car
+    a, b = _unpack2(expr, _ERROR)
     if type(a) is not type(b):
         result = FALSE
     elif isinstance(a, Nil):
@@ -696,74 +714,49 @@ def _operative_eq(env, expr, parent):
 # (pair? expr)
 def _operative_pair(env, expr, parent):
     _ERROR = "expected (pair? ANY)"
-    if not isinstance(expr, Pair): raise RuntimeError(_ERROR)
-    if not isinstance(expr.cdr, Nil): raise RuntimeError(_ERROR)
-    pair = expr.car
+    pair = _unpack1(expr, _ERROR)
     return f_return(parent, TRUE if isinstance(pair, Pair) else FALSE)
 
 # (cons a b)
 def _operative_cons(env, expr, parent):
     _ERROR = "expected (cons ANY ANY)"
-    if not isinstance(expr, Pair): raise RuntimeError(_ERROR)
-    expr_cdr = expr.cdr
-    if not isinstance(expr_cdr, Pair): raise RuntimeError(_ERROR)
-    if not isinstance(expr_cdr.cdr, Nil): raise RuntimeError(_ERROR)
-    a = expr.car
-    b = expr_cdr.car
+    a, b = _unpack2(expr, _ERROR)
     return f_return(parent, MutablePair(a, b))
 
 # (car pair)
 def _operative_car(env, expr, parent):
     _ERROR = "expected (car PAIR)"
-    if not isinstance(expr, Pair): raise RuntimeError(_ERROR)
-    if not isinstance(expr.cdr, Nil): raise RuntimeError(_ERROR)
-    pair = expr.car
+    pair = _unpack1(expr, _ERROR)
     if not isinstance(pair, Pair): raise RuntimeError(_ERROR)
     return f_return(parent, pair.car)
 
 # (cdr pair)
 def _operative_cdr(env, expr, parent):
     _ERROR = "expected (cdr PAIR)"
-    if not isinstance(expr, Pair): raise RuntimeError(_ERROR)
-    if not isinstance(expr.cdr, Nil): raise RuntimeError(_ERROR)
-    pair = expr.car
+    pair = _unpack1(expr, _ERROR)
     if not isinstance(pair, Pair): raise RuntimeError(_ERROR)
     return f_return(parent, pair.cdr)
 
 # ($vau (dyn args) expr)
 def _operative_vau(env, expr, parent):
     _ERROR = "expected ($vau (PARAM PARAM) ANY)"
-    if not isinstance(expr, Pair): raise RuntimeError(_ERROR)
-    expr_cdr = expr.cdr
-    if not isinstance(expr_cdr, Pair): raise RuntimeError(_ERROR)
-    if not isinstance(expr_cdr.cdr, Nil): raise RuntimeError(_ERROR)
-    expr_car = expr.car
-    if not isinstance(expr_car, Pair): raise RuntimeError(_ERROR)
-    expr_car_cdr = expr_car.cdr
-    if not isinstance(expr_car_cdr, Pair): raise RuntimeError(_ERROR)
-    if not isinstance(expr_car_cdr.cdr, Nil): raise RuntimeError(_ERROR)
-    envname = expr_car.car
+    envname_name, body = _unpack2(expr, _ERROR)
+    envname, name = _unpack2(envname_name, _ERROR)
     if not isinstance(envname, Symbol) and not isinstance(envname, Ignore): raise RuntimeError(_ERROR)
-    name = expr_car_cdr.car
     if not isinstance(name, Symbol) and not isinstance(name, Ignore): raise RuntimeError(_ERROR)
-    body = expr_cdr.car
     return f_return(parent, Combiner(0, UserDefinedOperative(env, envname, name, body)))
 
 # (wrap combiner)
 def _operative_wrap(env, expr, parent):
     _ERROR = "expected (wrap COMBINER)"
-    if not isinstance(expr, Pair): raise RuntimeError(_ERROR)
-    if not isinstance(expr.cdr, Nil): raise RuntimeError(_ERROR)
-    combiner = expr.car
+    combiner = _unpack1(expr, _ERROR)
     if not isinstance(combiner, Combiner): raise RuntimeError(_ERROR)
     return f_return(parent, Combiner(combiner.num_wraps + 1, combiner.operative))
 
 # (unwrap combiner)
 def _operative_unwrap(env, expr, parent):
     _ERROR = "expected (unwrap COMBINER)"
-    if not isinstance(expr, Pair): raise RuntimeError(_ERROR)
-    if not isinstance(expr.cdr, Nil): raise RuntimeError(_ERROR)
-    combiner = expr.car
+    combiner = _unpack1(expr, _ERROR)
     if not isinstance(combiner, Combiner): raise RuntimeError(_ERROR)
     if combiner.num_wraps == 0: raise RuntimeError(_ERROR)
     return f_return(parent, Combiner(combiner.num_wraps - 1, combiner.operative))
@@ -771,13 +764,8 @@ def _operative_unwrap(env, expr, parent):
 # (eval env expr)
 def _operative_eval(env, expr, parent):
     _ERROR = "expected (eval ENVIRONMENT ANY)"
-    if not isinstance(expr, Pair): raise RuntimeError(_ERROR)
-    expr_cdr = expr.cdr
-    if not isinstance(expr_cdr, Pair): raise RuntimeError(_ERROR)
-    if not isinstance(expr_cdr.cdr, Nil): raise RuntimeError(_ERROR)
-    environment = expr.car
+    environment, expression = _unpack2(expr, _ERROR)
     if not isinstance(environment, Environment): raise RuntimeError(_ERROR)
-    expression = expr_cdr.car
     # Special-case operative calls to not let the JIT driver promote the pair
     if isinstance(expression, Pair):
         combiner = expression.car
@@ -791,9 +779,7 @@ def _operative_make_environment(env, expr, parent):
     if isinstance(expr, Nil):
         environment = None
     else:
-        if not isinstance(expr, Pair): raise RuntimeError(_ERROR)
-        if not isinstance(expr.cdr, Nil): raise RuntimeError(_ERROR)
-        environment = expr.car
+        environment = _unpack1(expr, _ERROR)
         if not isinstance(environment, Environment): raise RuntimeError(_ERROR)
     return f_return(parent, Environment({}, environment))
 
@@ -810,13 +796,8 @@ def _f_define(static, value, parent):
 _F_DEFINE = PrimitiveOperative(_f_define)
 def _operative_define(env, expr, parent):
     _ERROR = "expected ($define! PARAM ANY)"
-    if not isinstance(expr, Pair): raise RuntimeError(_ERROR)
-    expr_cdr = expr.cdr
-    if not isinstance(expr_cdr, Pair): raise RuntimeError(_ERROR)
-    if not isinstance(expr_cdr.cdr, Nil): raise RuntimeError(_ERROR)
-    name = expr.car
+    name, value = _unpack2(expr, _ERROR)
     if not isinstance(name, Symbol) and not isinstance(name, Ignore): raise RuntimeError(_ERROR)
-    value = expr_cdr.car
     next_env = FDefineEnvironment(env, name)
     next_continuation = Continuation(next_env, _F_DEFINE, parent)
     next_continuation._call_info = value
@@ -837,15 +818,7 @@ def _f_if(static, result, parent):
 _F_IF = PrimitiveOperative(_f_if)
 def _operative_if(env, expr, parent):
     _ERROR = "expected ($if ANY ANY ANY)"
-    if not isinstance(expr, Pair): raise RuntimeError(_ERROR)
-    expr_cdr = expr.cdr
-    if not isinstance(expr_cdr, Pair): raise RuntimeError(_ERROR)
-    expr_cdr_cdr = expr_cdr.cdr
-    if not isinstance(expr_cdr_cdr, Pair): raise RuntimeError(_ERROR)
-    if not isinstance(expr_cdr_cdr.cdr, Nil): raise RuntimeError(_ERROR)
-    cond = expr.car
-    then = expr_cdr.car
-    orelse = expr_cdr_cdr.car
+    cond, then, orelse = _unpack3(expr, _ERROR)
     next_env = FIfEnvironment(env, then, orelse)
     next_continuation = Continuation(next_env, _F_IF, parent)
     next_continuation._call_info = cond
@@ -864,12 +837,7 @@ def _f_binds(static, value, parent):
 _F_BINDS = PrimitiveOperative(_f_binds)
 def _operative_binds(env, expr, parent):
     _ERROR = "expected ($binds? ENV SYMBOL)"
-    if not isinstance(expr, Pair): raise RuntimeError(_ERROR)
-    expr_cdr = expr.cdr
-    if not isinstance(expr_cdr, Pair): raise RuntimeError(_ERROR)
-    if not isinstance(expr_cdr.cdr, Nil): raise RuntimeError(_ERROR)
-    env_expr = expr.car
-    name = expr_cdr.car
+    env_expr, name = _unpack2(expr, _ERROR)
     if not isinstance(name, Symbol): raise RuntimeError(_ERROR)
     next_env = FBindsEnvironment(name)
     next_continuation = Continuation(next_env, _F_BINDS, parent)
