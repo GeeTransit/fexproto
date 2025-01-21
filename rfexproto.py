@@ -155,6 +155,10 @@ class EvaluationError(Exception):
         # Actual exception which stops the evaluation loop
         self.value = value
         self.parent = parent
+class EvaluationDone(Exception):
+    def __init__(self, value):
+        # Resolved value which stops the evaluation loop
+        self.value = value
 
 def _f_error_cont(env, expr, parent):
     if isinstance(expr, Pair):
@@ -163,6 +167,9 @@ def _f_error_cont(env, expr, parent):
             raise EvaluationError(expr.cdr, original_parent)
     raise EvaluationError(expr)
 ERROR_CONT = Continuation(None, PrimitiveOperative(_f_error_cont), None)
+def _f_evaluation_done(env, expr, parent):
+    raise EvaluationDone(expr)
+EVALUATION_DONE = PrimitiveOperative(_f_evaluation_done)
 
 # Variable lookup and environment versioning
 
@@ -364,12 +371,14 @@ jitdriver = jit.JitDriver(
 
 def fully_evaluate(state):
     expr, env, continuation = state
-    while continuation is not None or (expr is not None and env is not None):
-        jitdriver.jit_merge_point(expr=expr, env=env, continuation=continuation)
-        expr, env, continuation = step_evaluate((expr, env, continuation))
-        if continuation is not None and continuation._should_enter:
-            jitdriver.can_enter_jit(expr=expr, env=env, continuation=continuation)
-    return env or expr
+    try:
+        while True:
+            jitdriver.jit_merge_point(expr=expr, env=env, continuation=continuation)
+            expr, env, continuation = step_evaluate((expr, env, continuation))
+            if continuation._should_enter:
+                jitdriver.can_enter_jit(expr=expr, env=env, continuation=continuation)
+    except EvaluationDone as e:
+        return e.value
 
 # TODO: Look into how Pycket does runtime call-graph construction to
 # automatically infer loops. See https://doi.org/10.1145/2858949.2784740
@@ -926,7 +935,7 @@ def main(argv):
     env = Environment({}, Environment(_DEFAULT_ENV, None))
     # Evaluate expressions and write their results
     for expr in exprs:
-        parent = Continuation(None, NOOP, None)
+        parent = Continuation(None, EVALUATION_DONE, None)
         parent._call_info = expr
         state = f_eval(env, expr, parent)
         try:
