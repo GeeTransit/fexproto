@@ -766,12 +766,11 @@ def _operative_eval(env, expr, parent):
     _ERROR = "expected (eval ENVIRONMENT ANY)"
     environment, expression = _unpack2(expr, _ERROR)
     if not isinstance(environment, Environment): raise RuntimeError(_ERROR)
-    # Special-case operative calls to not let the JIT driver promote the pair
-    if isinstance(expression, Pair):
-        combiner = expression.car
-        if isinstance(combiner, Combiner) and combiner.num_wraps == 0:
-            return combiner.operative.call(environment, expression.cdr, parent)
-    return f_eval(environment, expression, parent)
+    # Don't let the JIT driver promote the expression (since it can be a
+    # mutable pair constructed at runtime)
+    state = f_eval(environment, expression, parent)
+    state = step_evaluate(state)
+    return state
 
 # (make-environment [parent])
 def _operative_make_environment(env, expr, parent):
