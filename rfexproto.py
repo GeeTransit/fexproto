@@ -958,6 +958,9 @@ def main(argv):
 
 # RPython toolchain
 def target(driver, args):
+    driver.exe_name = __name__
+    if driver.config.translation.jit:
+        driver.exe_name += "-jit"
     return main, None
 def jitpolicy(driver):
     from rpython.jit.codewriter.policy import JitPolicy
