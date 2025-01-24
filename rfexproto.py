@@ -505,6 +505,7 @@ def parse(tokens, offsets=None, locations=None):
             tokens,
             offsets=offsets, locations=locations,
             line_no=line_no, char_no=char_no,
+            first_line_no=line_no, first_char_no=char_no,
         )
         return expr
     if token == "#t" or token == "#T":
@@ -545,6 +546,7 @@ def _parse_elements(
     tokens,
     offsets=None, locations=None,
     line_no=-1, char_no=-1,
+    first_line_no=-1, first_char_no=-1,
 ):
     token = tokens[-1]
     if token == ")":
@@ -568,12 +570,15 @@ def _parse_elements(
             raise ParsingError("expected close bracket", end_line_no, end_char_no)
         return element, end_line_no, end_char_no
     element = parse(tokens, offsets=offsets, locations=locations)
+    if not tokens:
+        raise ParsingError("unmatched open bracket", first_line_no, first_char_no)
     next_line_no = offsets[-1] if offsets is not None else -1
     next_char_no = offsets[-2] if offsets is not None else -1
     rest, end_line_no, end_char_no = _parse_elements(
         tokens,
         offsets=offsets, locations=locations,
         line_no=next_line_no, char_no=next_char_no,
+        first_line_no=first_line_no, first_char_no=first_char_no,
     )
     pair = ImmutablePair(element, rest)
     if locations is not None:
