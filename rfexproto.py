@@ -310,6 +310,12 @@ class StepEvCarEnvironment(Environment):
         self.p = p
         self.i = i
         self.res = res
+class FRemoteEvalEnvironment(Environment):
+    _attrs_ = Environment._attrs_ + ("expression",)
+    _immutable_fields_ = Environment._immutable_fields_
+    def __init__(self, expression):
+        Environment.__init__(self, None, None)
+        self.expression = expression
 class FIfEnvironment(Environment):
     _attrs_ = Environment._attrs_ + ("env", "then", "orelse")
     _immutable_fields_ = Environment._immutable_fields_
@@ -772,6 +778,27 @@ def _operative_eval(env, expr, parent):
     state = step_evaluate(state)
     return state
 
+# ($remote-eval env expr)
+def _f_remote_eval(static, value, parent):
+    assert isinstance(static, FRemoteEvalEnvironment)
+    expression = static.expression
+    if not isinstance(value, Environment):
+        raise RuntimeError("expected environment argument value")
+    if parent is not None:
+        parent = Continuation(parent.env, parent.operative, parent.parent)
+        parent._call_info = expression
+    state = f_eval(value, expression, parent)
+    state = step_evaluate(state)
+    return state
+_F_REMOTE_EVAL = PrimitiveOperative(_f_remote_eval)
+def _operative_remote_eval(env, expr, parent):
+    _ERROR = "expected ($remote-eval ENVIRONMENT ANY)"
+    environment, expression = _unpack2(expr, _ERROR)
+    next_env = FRemoteEvalEnvironment(expression)
+    next_continuation = Continuation(next_env, _F_REMOTE_EVAL, parent)
+    next_continuation._call_info = environment
+    return f_eval(env, environment, next_continuation)
+
 # (make-environment [parent])
 def _operative_make_environment(env, expr, parent):
     _ERROR = "expected (make-environment [ENVIRONMENT])"
@@ -856,6 +883,7 @@ _DEFAULT_ENV = {
     "wrap": _primitive(1, _operative_wrap),
     "unwrap": _primitive(1, _operative_unwrap),
     "eval": _primitive(1, _operative_eval),
+    "$remote-eval": _primitive(0, _operative_remote_eval),
     "make-environment": _primitive(1, _operative_make_environment),
     "$define!": _primitive(0, _operative_define),
     "$if": _primitive(0, _operative_if),
