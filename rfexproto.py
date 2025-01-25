@@ -702,6 +702,22 @@ def _operative_plus(env, expr, parent):
     if not isinstance(b, Int): raise RuntimeError(_ERROR)
     return f_return(parent, Int(a.value + b.value))
 
+# (* a b)
+def _operative_times(env, expr, parent):
+    _ERROR = "expected (* INT INT)"
+    a, b = _unpack2(expr, _ERROR)
+    if not isinstance(a, Int): raise RuntimeError(_ERROR)
+    if not isinstance(b, Int): raise RuntimeError(_ERROR)
+    return f_return(parent, Int(a.value * b.value))
+
+# (<=? a b)
+def _operative_less_equal(env, expr, parent):
+    _ERROR = "expected (<=? INT INT)"
+    a, b = _unpack2(expr, _ERROR)
+    if not isinstance(a, Int): raise RuntimeError(_ERROR)
+    if not isinstance(b, Int): raise RuntimeError(_ERROR)
+    return f_return(parent, TRUE if a.value <= b.value else FALSE)
+
 # (eq? a b)
 def _operative_eq(env, expr, parent):
     _ERROR = "expected (eq? ANY ANY)"
@@ -903,6 +919,8 @@ def _primitive(num_wraps, func):
     return Combiner(num_wraps, PrimitiveOperative(func))
 _DEFAULT_ENV = {
     "+": _primitive(1, _operative_plus),
+    "*": _primitive(1, _operative_times),
+    "<=?": _primitive(1, _operative_less_equal),
     "eq?": _primitive(1, _operative_eq),
     "pair?": _primitive(1, _operative_pair),
     "cons": _primitive(1, _operative_cons),
