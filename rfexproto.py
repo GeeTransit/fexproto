@@ -141,6 +141,14 @@ def _f_noop(env, expr, parent):
     return f_return(parent, expr)
 NOOP = PrimitiveOperative(_f_noop)
 
+def _f_copy_immutable(expr):
+    if not isinstance(expr, MutablePair):
+        return expr
+    # TODO: when mutation is introduced, support self-referencing structures
+    car = _f_copy_immutable(expr.car)
+    cdr = _f_copy_immutable(expr.cdr)
+    return ImmutablePair(car, cdr)
+
 # Exceptions
 
 class ParsingError(Exception):
@@ -775,7 +783,8 @@ def _operative_vau(env, expr, parent):
     envname, name = _unpack2(envname_name, _ERROR)
     if not isinstance(envname, Symbol) and not isinstance(envname, Ignore): raise RuntimeError(_ERROR)
     if not isinstance(name, Symbol) and not isinstance(name, Ignore): raise RuntimeError(_ERROR)
-    return f_return(parent, Combiner(0, UserDefinedOperative(env, envname, name, body)))
+    immutable_body = _f_copy_immutable(body)
+    return f_return(parent, Combiner(0, UserDefinedOperative(env, envname, name, immutable_body)))
 
 # (wrap combiner)
 def _operative_wrap(env, expr, parent):
