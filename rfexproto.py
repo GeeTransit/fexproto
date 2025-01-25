@@ -706,26 +706,22 @@ def _operative_plus(env, expr, parent):
 def _operative_eq(env, expr, parent):
     _ERROR = "expected (eq? ANY ANY)"
     a, b = _unpack2(expr, _ERROR)
-    if type(a) is not type(b):
-        result = FALSE
+    if False:
+        pass
     elif isinstance(a, Nil):
-        result = TRUE
+        result = TRUE if isinstance(b, Nil) else FALSE
     elif isinstance(a, Ignore):
-        result = TRUE
+        result = TRUE if isinstance(b, Ignore) else FALSE
     elif isinstance(a, Inert):
-        result = TRUE
+        result = TRUE if isinstance(b, Inert) else FALSE
     elif isinstance(a, Boolean):
-        assert isinstance(b, Boolean)
-        result = TRUE if a.value == b.value else FALSE
+        result = TRUE if isinstance(b, Boolean) and a.value == b.value else FALSE
     elif isinstance(a, Int):
-        assert isinstance(b, Int)
-        result = TRUE if a.value == b.value else FALSE
+        result = TRUE if isinstance(b, Int) and a.value == b.value else FALSE
     elif isinstance(a, Symbol):
-        assert isinstance(b, Symbol)
-        result = TRUE if a.name == b.name else FALSE
+        result = TRUE if isinstance(b, Symbol) and a.name == b.name else FALSE
     elif isinstance(a, String):
-        assert isinstance(b, String)
-        result = TRUE if a.value == b.value else FALSE
+        result = TRUE if isinstance(b, String) and a.value == b.value else FALSE
     else:
         result = TRUE if a is b else FALSE
     return f_return(parent, result)
