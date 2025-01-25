@@ -450,19 +450,19 @@ def _step_call_evcar(static, value, parent):
     num_wraps = static.num_wraps
     assert isinstance(num_wraps, int)
     todo = static.todo
-    assert todo is NIL or isinstance(todo, Pair)
+    assert isinstance(todo, Nil) or isinstance(todo, Pair)
     p = static.p
     assert isinstance(p, int)
     i = static.i
     assert isinstance(i, int)
     res = static.res
-    assert res is NIL or isinstance(res, Pair)
+    assert isinstance(res, Nil) or isinstance(res, Pair)
     res = Pair(value, res)
     i = i + 1
     if i == p:
         i = 0
         num_wraps = num_wraps - 1
-        assert todo is NIL
+        assert isinstance(todo, Nil)
         for _ in range(p): assert isinstance(res, Pair); todo = Pair(res.car, todo); res = res.cdr
         assert isinstance(todo, Pair)
         if num_wraps == 0:
