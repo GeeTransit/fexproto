@@ -416,10 +416,14 @@ def _step_call_wrapped(static, combiner, parent):
     if not isinstance(c, Nil):
         raise RuntimeError("applicative call args must be proper list")
     assert isinstance(args, Pair)
+    next_expr = args.car
     next_env = StepEvCarEnvironment(env, combiner.operative, combiner.num_wraps, args.cdr, p, 0, NIL)
     next_continuation = Continuation(next_env, _STEP_CALL_EVCAR, parent)
-    next_continuation._call_info = args.car
-    return f_eval(env, args.car, next_continuation)
+    next_continuation._call_info = next_expr
+    state = f_eval(env, next_expr, next_continuation)
+    if jit.isvirtual(next_expr):
+        state = step_evaluate(state)
+    return state
 _STEP_CALL_WRAPPED = PrimitiveOperative(_step_call_wrapped)
 
 @jit.unroll_safe
@@ -452,9 +456,13 @@ def _step_call_evcar(static, value, parent):
             return f_return(continuation, todo)
     assert isinstance(todo, Pair)
     next_env = StepEvCarEnvironment(env, operative, num_wraps, todo.cdr, p, i, res)
+    next_expr = todo.car
     next_continuation = Continuation(next_env, _STEP_CALL_EVCAR, parent)
-    next_continuation._call_info = todo.car
-    return f_eval(env, todo.car, next_continuation)
+    next_continuation._call_info = next_expr
+    state = f_eval(env, next_expr, next_continuation)
+    if jit.isvirtual(next_expr):
+        state = step_evaluate(state)
+    return state
 _STEP_CALL_EVCAR = PrimitiveOperative(_step_call_evcar)
 
 # == Lexing, parsing, and writing logic
@@ -780,7 +788,8 @@ def _operative_eval(env, expr, parent):
     # Don't let the JIT driver promote the expression (since it can be a
     # mutable pair constructed at runtime)
     state = f_eval(environment, expression, parent)
-    state = step_evaluate(state)
+    if jit.isvirtual(expression):
+        state = step_evaluate(state)
     return state
 
 # ($remote-eval env expr)
@@ -793,7 +802,8 @@ def _f_remote_eval(static, value, parent):
         parent = Continuation(parent.env, parent.operative, parent.parent)
         parent._call_info = expression
     state = f_eval(value, expression, parent)
-    state = step_evaluate(state)
+    if jit.isvirtual(expression):
+        state = step_evaluate(state)
     return state
 _F_REMOTE_EVAL = PrimitiveOperative(_f_remote_eval)
 def _operative_remote_eval(env, expr, parent):
@@ -802,7 +812,10 @@ def _operative_remote_eval(env, expr, parent):
     next_env = FRemoteEvalEnvironment(expression)
     next_continuation = Continuation(next_env, _F_REMOTE_EVAL, parent)
     next_continuation._call_info = environment
-    return f_eval(env, environment, next_continuation)
+    state = f_eval(env, environment, next_continuation)
+    if jit.isvirtual(environment):
+        state = step_evaluate(state)
+    return state
 
 # (make-environment [parent])
 def _operative_make_environment(env, expr, parent):
@@ -832,7 +845,10 @@ def _operative_define(env, expr, parent):
     next_env = FDefineEnvironment(env, name)
     next_continuation = Continuation(next_env, _F_DEFINE, parent)
     next_continuation._call_info = value
-    return f_eval(env, value, next_continuation)
+    state = f_eval(env, value, next_continuation)
+    if jit.isvirtual(value):
+        state = step_evaluate(state)
+    return state
 
 # ($if cond then orelse)
 def _f_if(static, result, parent):
@@ -842,10 +858,16 @@ def _f_if(static, result, parent):
         raise RuntimeError("expected boolean test value")
     if result.value:
         then = static.then
-        return f_eval(env, then, parent)
+        state = f_eval(env, then, parent)
+        if jit.isvirtual(then):
+            state = step_evaluate(state)
+        return state
     else:
         orelse = static.orelse
-        return f_eval(env, orelse, parent)
+        state = f_eval(env, orelse, parent)
+        if jit.isvirtual(orelse):
+            state = step_evaluate(state)
+        return state
 _F_IF = PrimitiveOperative(_f_if)
 def _operative_if(env, expr, parent):
     _ERROR = "expected ($if ANY ANY ANY)"
@@ -853,7 +875,10 @@ def _operative_if(env, expr, parent):
     next_env = FIfEnvironment(env, then, orelse)
     next_continuation = Continuation(next_env, _F_IF, parent)
     next_continuation._call_info = cond
-    return f_eval(env, cond, next_continuation)
+    state = f_eval(env, cond, next_continuation)
+    if jit.isvirtual(cond):
+        state = step_evaluate(state)
+    return state
 
 # ($binds? env name)
 def _f_binds(static, value, parent):
@@ -873,7 +898,10 @@ def _operative_binds(env, expr, parent):
     next_env = FBindsEnvironment(name)
     next_continuation = Continuation(next_env, _F_BINDS, parent)
     next_continuation._call_info = env_expr
-    return f_eval(env, env_expr, next_continuation)
+    state = f_eval(env, env_expr, next_continuation)
+    if jit.isvirtual(env_expr):
+        state = step_evaluate(state)
+    return state
 
 def _primitive(num_wraps, func):
     return Combiner(num_wraps, PrimitiveOperative(func))
