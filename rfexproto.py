@@ -248,10 +248,11 @@ def _environment_lookup(env, name):
     env = env.parent
     if env is None:
         return None
-    if not jit.isvirtual(env):
-        jit.promote(env)
-        if not jit.isvirtual(env.version):
-            jit.promote(env.version)
+    if jit.isvirtual(env):
+        return _environment_lookup(env, name)
+    jit.promote(env)
+    if not jit.isvirtual(env.version):
+        jit.promote(env.version)
     return _environment_lookup_version(env, name_name, env.version)
 
 @jit.elidable
