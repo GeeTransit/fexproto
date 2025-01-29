@@ -430,12 +430,12 @@ def _step_call_wrapped(static, combiner, parent):
     assert isinstance(static, StepWrappedEnvironment)
     env = static.env
     args = static.args
-    assert isinstance(combiner, Combiner)
+    if not isinstance(combiner, Combiner):
+        raise RuntimeError("combiner call car must be combiner")
     if combiner.num_wraps == 0 or isinstance(args, Nil):
         return f_return(Continuation(env, combiner.operative, parent), args)
     c = args; p = 0
     while isinstance(c, Pair): p += 1; c = c.cdr
-    assert p > 0
     if not isinstance(c, Nil):
         raise RuntimeError("applicative call args must be proper list")
     assert isinstance(args, Pair)
