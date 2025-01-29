@@ -349,6 +349,11 @@ class FBindsEnvironment(Environment):
 
 # Core interpreter logic
 
+def _f_toplevel_eval(env, expr):
+    parent = Continuation(None, EVALUATION_DONE, None)
+    parent._call_info = expr
+    return f_eval(env, expr, parent)
+
 def f_return(parent, obj):
     return None, obj, parent
 def f_return_loop_constant(parent, obj):
@@ -680,6 +685,26 @@ def _f_print_trace(continuation, sources=None):
         _f_write(expr)
         print()
 
+def _f_format_syntax_error(error, lines):
+    print("! --- syntax error ---")
+    print("  in <stdin> at %d [%d:]" % (error.line_no + 1, error.char_no + 1))
+    print("    ", end="")
+    print(lines[error.line_no])
+    print("! syntax-error ", end="")
+    _f_write(String(error.message))
+    print()
+
+def _f_format_evaluation_error(error, lines, locations):
+    if error.parent is not None:
+        print("! --- stack trace ---")
+        sources = {}
+        for expr, l1, c1, l2, c2 in locations:
+            sources[expr] = ("<stdin>", l1, c1, l2, c2)
+        _f_print_trace(error.parent, sources=sources)
+    print("! error ", end="")
+    _f_write(error.value)
+    print()
+
 # == Primitive combiners
 
 # Pair unpacking helper functions (must specialize on call site since the
@@ -952,36 +977,20 @@ def main(argv):
         while tokens:
             exprs.append(parse(tokens, offsets=offsets, locations=locations))
     except ParsingError as e:
-        print("! --- syntax error ---")
-        print("  in <stdin> at %d [%d:]" % (e.line_no + 1, e.char_no + 1))
-        print("    ", end="")
-        print(text.split("\n")[e.line_no])
-        print("! syntax-error ", end="")
-        _f_write(String(e.message))
-        print()
+        _f_format_syntax_error(e, text.split("\n"))
         return 1
     # Setup standard environment
     env = Environment({}, Environment(_DEFAULT_ENV, None))
     # Evaluate expressions and write their results
     for expr in exprs:
-        parent = Continuation(None, EVALUATION_DONE, None)
-        parent._call_info = expr
-        state = f_eval(env, expr, parent)
+        state = _f_toplevel_eval(env, expr)
         try:
             value = fully_evaluate(state)
             if not isinstance(value, Inert):
                 _f_write(value)
                 print()
         except EvaluationError as e:
-            if e.parent is not None:
-                print("! --- stack trace ---")
-                sources = {}
-                for expr, l1, c1, l2, c2 in locations:
-                    sources[expr] = ("<stdin>", l1, c1, l2, c2)
-                _f_print_trace(e.parent, sources=sources)
-            print("! error ", end="")
-            _f_write(e.value)
-            print()
+            _f_format_evaluation_error(e, text.split("\n"), locations)
             return 1
     return 0
 
