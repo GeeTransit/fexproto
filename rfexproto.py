@@ -533,6 +533,8 @@ def parse(tokens, offsets=None, locations=None):
             first_line_no=line_no, first_char_no=char_no,
         )
         return expr
+    if token == ".":
+        raise ParsingError("unexpected dot", line_no, char_no)
     if token == "#t" or token == "#T":
         return TRUE
     if token == "#f" or token == "#F":
@@ -559,7 +561,10 @@ def parse(tokens, offsets=None, locations=None):
             i = match.end()
         return String("".join(chars))
     if token[0].isdigit() or token[0] in "+-" and len(token) > 1 and token[1].isdigit():
-        return Int(int(token))
+        try:
+            return Int(int(token))
+        except ValueError:
+            raise ParsingError("unknown number", line_no, char_no)
     if token[0] != "#":
         symbol = Symbol(token.lower())
         if locations is not None:
@@ -573,6 +578,8 @@ def _parse_elements(
     line_no=-1, char_no=-1,
     first_line_no=-1, first_char_no=-1,
 ):
+    if not tokens:
+        raise ParsingError("unmatched open bracket", first_line_no, first_char_no)
     token = tokens[-1]
     if token == ")":
         tokens.pop()
@@ -580,15 +587,23 @@ def _parse_elements(
         end_char_no = offsets.pop() if offsets is not None else -1
         return NIL, end_line_no, end_char_no
     if token == ".":
+        if line_no == first_line_no and char_no == first_char_no:
+            line_no = offsets[-1] if offsets is not None else -1
+            char_no = offsets[-2] if offsets is not None else -1
+            raise ParsingError("missing car element", line_no, char_no)
         tokens.pop()
         if offsets is not None:
             offsets.pop()
             offsets.pop()
+        if not tokens:
+            raise ParsingError("unmatched open bracket and missing cdr element", first_line_no, first_char_no)
         if tokens[-1] == ")":
             line_no = offsets[-1] if offsets is not None else -1
             char_no = offsets[-2] if offsets is not None else -1
             raise ParsingError("unexpected close bracket", line_no, char_no)
         element = parse(tokens, offsets=offsets, locations=locations)
+        if not tokens:
+            raise ParsingError("unmatched open bracket", first_line_no, first_char_no)
         end_line_no = offsets.pop() if offsets is not None else -1
         end_char_no = offsets.pop() if offsets is not None else -1
         if tokens.pop() != ")":
