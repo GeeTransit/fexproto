@@ -5,6 +5,7 @@ try:
     from rpython.rlib.rsre import rsre_re as re
     from rpython.rlib import jit
     from rpython.rlib import objectmodel
+    from rpython.rlib import rfile
 except ImportError:
     import re
     class jit(object):
@@ -28,6 +29,9 @@ except ImportError:
         class specialize(object):
             @staticmethod
             def call_location(): return lambda func: func
+    class rfile(object):
+        @staticmethod
+        def create_stdio(): import sys; return sys.stdin, sys.stdout, sys.stderr
 
 # == Interpreter types and logic
 
@@ -492,12 +496,12 @@ _TOKEN_PATTERN = re.compile("|".join([
     r'\n',  # newline (parsed separately to count lines)
     r';[^\r\n]*',  # single-line comments
 ]))
-def tokenize(text, offsets=None):
+def tokenize(text, offsets=None, init_line_no=0, init_char_no=0):
     result = []
     i = 0
     len_text = len(text)
-    line_no = 0
-    line_start_i = 0
+    line_no = init_line_no
+    line_start_i = -init_char_no
     while i < len_text:
         match = _TOKEN_PATTERN.match(text, i)
         if match is None:
@@ -625,6 +629,108 @@ def _parse_elements(
         locations.append((pair, line_no, char_no, end_line_no, end_char_no + 1))
     return pair, end_line_no, end_char_no
 
+# Helper class to handle REPL input state
+class _InteractiveParser:
+    def __init__(self):
+        self.curr_lines = []
+        self.curr_tokens = []
+        self.curr_offsets = []
+        self.curr_exprs = []
+        self.curr_locations = []
+        self.last_lines = None
+    @staticmethod
+    @objectmodel.specialize.call_location()
+    def extendleft(a, b):
+        a.reverse()
+        a.extend(b)
+        a.reverse()
+    def handle(self, line, lines=None, locations=None):  # returns done, exprs
+        if lines is None: lines = []
+        if locations is None: locations = []
+        # Add line to history
+        if line and line[-1] == "\n":
+            self.curr_lines.append(line[:-1])
+        else:
+            self.curr_lines.append(line)
+        try:
+            # Try to tokenize the line
+            temp_offsets = []
+            temp_tokens = tokenize(
+                line, offsets=temp_offsets,
+                init_line_no=len(lines)+len(self.curr_lines)-1,
+                init_char_no=0,
+            )
+            self.extendleft(self.curr_tokens, temp_tokens)
+            self.extendleft(self.curr_offsets, temp_offsets)
+            # Try to parse the tokens
+            copy_tokens = self.curr_tokens[:]
+            copy_offsets = self.curr_offsets[:]
+            while copy_tokens:
+                assert copy_offsets
+                temp_locations = []
+                temp_expr = parse(
+                    copy_tokens,
+                    offsets=copy_offsets,
+                    locations=temp_locations,
+                )
+                self.curr_exprs.append(temp_expr)
+                self.curr_locations.extend(temp_locations)
+                del self.curr_tokens[len(copy_tokens):]
+                del self.curr_offsets[len(copy_offsets):]
+        except ParsingError as e:
+            if e.message.startswith("unmatched open bracket"):
+                # More input is needed
+                return False, []
+            # Save lines (for later printing) and clear state
+            self.last_lines = self.curr_lines[:]
+            del self.curr_lines[:]
+            del self.curr_tokens[:]
+            del self.curr_offsets[:]
+            del self.curr_exprs[:]
+            del self.curr_locations[:]
+            raise
+        # All tokens were parsed, return expressions
+        lines.extend(self.curr_lines)
+        locations.extend(self.curr_locations)
+        copy_exprs = self.curr_exprs[:]
+        del self.curr_lines[:]
+        del self.curr_locations[:]
+        del self.curr_exprs[:]
+        return True, copy_exprs
+
+def _prompt_lines(prompt_list):
+    import os
+    stdin, stdout, stderr = rfile.create_stdio()
+    leftover = []
+    while True:
+        # Output the prompt if at the start of a line
+        if not leftover:
+            stdout.write(prompt_list[0])
+            stdout.flush()
+        # Read a chunk of data, usually ends with a newline
+        part = os.read(0, 2048)
+        if not part:
+            if leftover:
+                yield "".join(leftover)
+            return
+        # Split on newlines and yield each line
+        i = part.find("\n")
+        if i < 0:
+            leftover.append(part)
+        else:
+            leftover.append(part[:i+1])
+            yield "".join(leftover)
+            del leftover[:]
+            while True:
+                j = part.find("\n", i+1)
+                if j < 0:
+                    if i+1 < len(part):
+                        leftover.append(part[i+1:])
+                    break
+                else:
+                    yield part[i+1:j+1]
+                    i = j
+
 def _f_write(obj):
     if isinstance(obj, Nil):
         print("()", end="")
@@ -700,11 +806,11 @@ def _f_print_trace(continuation, sources=None):
         _f_write(expr)
         print()
 
-def _f_format_syntax_error(error, lines):
+def _f_format_syntax_error(error, lines, starts_at=0):
     print("! --- syntax error ---")
     print("  in <stdin> at %d [%d:]" % (error.line_no + 1, error.char_no + 1))
     print("    ", end="")
-    print(lines[error.line_no])
+    print(lines[error.line_no - starts_at])
     print("! syntax-error ", end="")
     _f_write(String(error.message))
     print()
@@ -974,6 +1080,43 @@ def main(argv):
     jit.set_param(None, "threshold", 131)
     jit.set_param(None, "trace_eagerness", 50)
     jit.set_param(None, "max_unroll_loops", 15)
+
+    # Start REPL if no args and is TTY
+    if len(argv) == 1 and os.isatty(0):
+        # REPL prompts
+        PROMPT_1 = "rf> "  # default prompt
+        PROMPT_2 = "... "  # multi-line prompt
+        prompt_list = [PROMPT_1]
+        # Setup standard environment
+        env = Environment({}, Environment(_DEFAULT_ENV, None))
+        # Parser state
+        lines = []
+        locations = []
+        parser = _InteractiveParser()
+        for line in _prompt_lines(prompt_list):
+            # Attempt to lex and parse
+            try:
+                done, exprs = parser.handle(line, lines=lines, locations=locations)
+            except ParsingError as e:
+                _f_format_syntax_error(e, parser.last_lines, starts_at=len(lines))
+                prompt_list[0] = PROMPT_1
+                continue
+            if not done:
+                prompt_list[0] = PROMPT_2
+                continue
+            # Evaluate expressions and write their results
+            try:
+                for expr in exprs:
+                    state = _f_toplevel_eval(env, expr)
+                    value = fully_evaluate(state)
+                    if not isinstance(value, Inert):
+                        _f_write(value)
+                        print()
+            except EvaluationError as e:
+                _f_format_evaluation_error(e, lines, locations)
+            prompt_list[0] = PROMPT_1
+        return 0
+
     # Read whole STDIN
     parts = []
     while True:
