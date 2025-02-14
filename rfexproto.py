@@ -75,16 +75,13 @@ class Symbol(Object):
         assert isinstance(name, str)
         self.name = name
 class Environment(Object):
-    _attrs_ = _immutable_fields_ = ("storage", "parent", "localmap", "version", "children")
+    _immutable_fields_ = ("storage", "parent")
     def __init__(self, bindings, parent):
         assert parent is None or isinstance(parent, Environment)
         storage, localmap = _environment_tostoragemap(bindings)
         self.storage = storage
         self.parent = parent
         self.localmap = localmap
-        self.version = VersionTag()
-        self.children = None
-        _environment_addchild(parent, self)
 class Continuation(Object):
     _immutable_fields_ = ("env", "operative", "parent")
     _attrs_ = _immutable_fields_ + ("_should_enter", "_call_info")
@@ -212,9 +209,6 @@ class LocalMap(object):
         return self.transitions[name]
 _ROOT_LOCALMAP = LocalMap()
 
-class VersionTag(object):
-    _attrs_ = _immutable_fields_ = ()
-
 @jit.unroll_safe
 def _environment_tostoragemap(bindings):
     storage = []
@@ -225,43 +219,18 @@ def _environment_tostoragemap(bindings):
             storage.append(value)
     return storage, localmap
 
-def _environment_addchild(parent, env):
-    if parent is not None and parent.children is None:
-        # First time the parent environment has a child
-        parent.children = []
-        if parent.parent is not None:
-            # Make grandparent hold weakref to parent. Versions only need to be
-            # updated for environments with children.
-            if parent.parent.children is None:
-                raise RuntimeError("env parent invariant broken?")
-            import weakref
-            parent.parent.children.append(weakref.ref(parent))
-
+@jit.unroll_safe
 def _environment_lookup(env, name):
-    # TODO: which promotes are actually necessary for performance?
+    # TODO: how to optimize constants? (usually global functions) Maybe look
+    # into how PyPy stores metadata about variables' types, whether it gets
+    # reassigned, and maybe even nested environments' types.
     name_name = name.name
     if not jit.isvirtual(name_name):
         jit.promote_string(name_name)
-    if env is None:
-        return None
-    if not jit.isvirtual(env) and not jit.isvirtual(env.localmap):
-        jit.promote(env.localmap)
-    index = env.localmap.find(name_name)
-    if index >= 0:
-        return env.storage[index]
-    env = env.parent
-    if env is None:
-        return None
-    if jit.isvirtual(env):
-        return _environment_lookup(env, name)
-    jit.promote(env)
-    if not jit.isvirtual(env.version):
-        jit.promote(env.version)
-    return _environment_lookup_version(env, name_name, env.version)
-
-@jit.elidable
-def _environment_lookup_version(env, name_name, version):
     while env is not None:
+        # Promote the local map since the combiner calls should be the same,
+        # hence variable lookups should be on the same lexical environments.
+        jit.promote(env.localmap)
         index = env.localmap.find(name_name)
         if index >= 0:
             return env.storage[index]
@@ -270,50 +239,25 @@ def _environment_lookup_version(env, name_name, version):
 
 def _environment_update(env, name, value):
     name_name = name.name
+    if not jit.isvirtual(name_name):
+        jit.promote_string(name_name)
     index = env.localmap.find(name_name)
     if index >= 0:
         env.storage[index] = value
     else:
         env.localmap = env.localmap.new_localmap_with(name_name)
         env.storage.append(value)
-    _environment_update_version(env, VersionTag())
-
-@jit.unroll_safe
-def _environment_update_version(env, version):
-    env.version = version
-    if env.children is not None:
-        cleanup = False
-        for child in env.children:
-            child_env = child()
-            if child_env is not None:
-                _environment_update_version(child_env, version)
-            else:
-                cleanup = True
-        if cleanup:
-            i = 0
-            for i in range(len(env.children)):
-                if env.children[i]() is None:
-                    break
-            j = i
-            for i in range(i, len(env.children)):
-                if env.children[i]() is None:
-                    continue
-                env.children[i], env.children[j] = env.children[j], env.children[i]
-                j += 1
-            del env.children[j:]
 
 # Specialized environments
 
 class StepWrappedEnvironment(Environment):
-    _attrs_ = Environment._attrs_ + ("env", "args")
-    _immutable_fields_ = Environment._immutable_fields_
+    _immutable_fields_ = Environment._immutable_fields_ + ("env", "args")
     def __init__(self, env, args):
         Environment.__init__(self, None, None)
         self.env = env
         self.args = args
 class StepEvCarEnvironment(Environment):
-    _attrs_ = Environment._attrs_ + ("env", "operative", "num_wraps", "todo", "p", "i", "res")
-    _immutable_fields_ = Environment._immutable_fields_
+    _immutable_fields_ = Environment._immutable_fields_ + ("env", "operative", "num_wraps", "todo", "p", "i", "res")
     def __init__(self, env, operative, num_wraps, todo, p, i, res):
         Environment.__init__(self, None, None)
         self.env = env
@@ -324,29 +268,25 @@ class StepEvCarEnvironment(Environment):
         self.i = i
         self.res = res
 class FRemoteEvalEnvironment(Environment):
-    _attrs_ = Environment._attrs_ + ("expression",)
-    _immutable_fields_ = Environment._immutable_fields_
+    _immutable_fields_ = Environment._immutable_fields_ + ("expression",)
     def __init__(self, expression):
         Environment.__init__(self, None, None)
         self.expression = expression
 class FIfEnvironment(Environment):
-    _attrs_ = Environment._attrs_ + ("env", "then", "orelse")
-    _immutable_fields_ = Environment._immutable_fields_
+    _immutable_fields_ = Environment._immutable_fields_ + ("env", "then", "orelse")
     def __init__(self, env, then, orelse):
         Environment.__init__(self, None, None)
         self.env = env
         self.then = then
         self.orelse = orelse
 class FDefineEnvironment(Environment):
-    _attrs_ = Environment._attrs_ + ("env", "name")
-    _immutable_fields_ = Environment._immutable_fields_
+    _immutable_fields_ = Environment._immutable_fields_ + ("env", "name")
     def __init__(self, env, name):
         Environment.__init__(self, None, None)
         self.env = env
         self.name = name
 class FBindsEnvironment(Environment):
-    _attrs_ = Environment._attrs_ + ("name",)
-    _immutable_fields_ = Environment._immutable_fields_
+    _immutable_fields_ = Environment._immutable_fields_ + ("name",)
     def __init__(self, name):
         Environment.__init__(self, None, None)
         self.name = name
@@ -436,6 +376,13 @@ def _step_call_wrapped(static, combiner, parent):
     args = static.args
     if not isinstance(combiner, Combiner):
         raise RuntimeError("combiner call car must be combiner")
+    # Promoting combiners should work in loops since otherwise the loop logic
+    # would be different each iteration.
+    if not jit.isvirtual(combiner):
+        jit.promote(combiner)
+    jit.promote(combiner.num_wraps)
+    if not jit.isvirtual(combiner.operative):
+        jit.promote(combiner.operative)
     if combiner.num_wraps == 0 or isinstance(args, Nil):
         return f_return(Continuation(env, combiner.operative, parent), args)
     c = args; p = 0
