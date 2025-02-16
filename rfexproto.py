@@ -414,13 +414,13 @@ def _step_call_evcar(static, value, parent):
     assert isinstance(i, int)
     res = static.res
     assert isinstance(res, Nil) or isinstance(res, Pair)
-    res = Pair(value, res)
+    res = MutablePair(value, res)
     i = i + 1
     if i == p:
         i = 0
         num_wraps = num_wraps - 1
         assert isinstance(todo, Nil)
-        for _ in range(p): assert isinstance(res, Pair); todo = Pair(res.car, todo); res = res.cdr
+        for _ in range(p): assert isinstance(res, Pair); todo = MutablePair(res.car, todo); res = res.cdr
         assert isinstance(todo, Pair)
         if num_wraps == 0:
             continuation = Continuation(env, operative, parent)
