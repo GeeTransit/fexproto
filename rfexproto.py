@@ -14,6 +14,8 @@ except ImportError:
         @staticmethod
         def set_param(*args): pass
         @staticmethod
+        def set_user_param(*args): pass
+        @staticmethod
         def promote(arg): return arg
         @staticmethod
         def promote_string(arg): return arg
@@ -1055,6 +1057,9 @@ def main(argv):
     jit.set_param(None, "threshold", 131)
     jit.set_param(None, "trace_eagerness", 50)
     jit.set_param(None, "max_unroll_loops", 15)
+    user_config_string = os.environ.get("RFEXPROTO_JIT_CONFIG")
+    if user_config_string is not None:
+        jit.set_user_param(None, user_config_string)
 
     # Start REPL if no args and is TTY
     if len(argv) == 1 and os.isatty(0):
