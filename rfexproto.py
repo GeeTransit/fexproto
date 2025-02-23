@@ -1,5 +1,3 @@
-from __future__ import print_function
-
 # Optional RPython imports
 try:
     from rpython.rlib.rsre import rsre_re as re
@@ -30,8 +28,21 @@ except ImportError:
             @staticmethod
             def call_location(): return lambda func: func
     class rfile(object):
-        @staticmethod
-        def create_stdio(): import sys; return sys.stdin, sys.stdout, sys.stderr
+        if b"" == "":  # Python 2
+            @staticmethod
+            def create_stdio():
+                import sys, os
+                # TODO: is this the correct way to reopen files in binary mode?
+                return (
+                    os.fdopen(sys.stdin.fileno(), "rb", 0),
+                    os.fdopen(sys.stdout.fileno(), "wb", 0),
+                    os.fdopen(sys.stderr.fileno(), "wb", 0),
+                )
+        else:
+            @staticmethod
+            def create_stdio():
+                import sys
+                return sys.stdin.buffer, sys.stdout.buffer, sys.stderr.buffer
 
 # == Interpreter types and logic
 
@@ -660,9 +671,7 @@ class _InteractiveParser:
         del self.curr_exprs[:]
         return True, copy_exprs
 
-def _prompt_lines(prompt_list):
-    import os
-    stdin, stdout, stderr = rfile.create_stdio()
+def _prompt_lines(stdin, stdout, prompt_list):
     leftover = []
     while True:
         # Output the prompt if at the start of a line
@@ -670,7 +679,7 @@ def _prompt_lines(prompt_list):
             stdout.write(prompt_list[0])
             stdout.flush()
         # Read a chunk of data, usually ends with a newline
-        part = os.read(0, 2048)
+        part = stdin.readline()
         if not part:
             if leftover:
                 yield "".join(leftover)
@@ -693,50 +702,53 @@ def _prompt_lines(prompt_list):
                     yield part[i+1:j+1]
                     i = j
 
-def _f_write(obj):
+def _f_write(file, obj):
     if isinstance(obj, Nil):
-        print("()", end="")
+        file.write(b"()")
     elif isinstance(obj, Int):
-        print(str(obj.value), end="")
+        file.write(b"%d" % (obj.value,))
     elif isinstance(obj, String):
-        print('"', end="")
+        file.write(b'"')
         for char in obj.value:
             code = _c_char_to_int(char)
             if char in b'\a\b\t\n\r"\\':  # escape sequences
-                print("\\"+'abtnr"\\'[b'\a\b\t\n\r"\\'.find(char)], end="")
+                file.write(b"\\")
+                file.write(_c_join_chars([b'abtnr"\\'[b'\a\b\t\n\r"\\'.find(char)]]))
             elif not 32 <= code < 128:  # unprintable codes
-                print("\\x"+"0123456789abcdef"[code//16]+"0123456789abcdef"[code%16], end="")
+                file.write(b"\\x")
+                file.write(_c_join_chars([b"0123456789abcdef"[code//16]]))
+                file.write(_c_join_chars([b"0123456789abcdef"[code%16]]))
             else:
-                print(_c_char_to_len1(char), end="")
-        print('"', end="")
+                file.write(_c_join_chars([char]))
+        file.write(b'"')
     elif isinstance(obj, Symbol):
-        print(_c_bytes_to_str(obj.name), end="")
+        file.write(obj.name)
     elif isinstance(obj, Ignore):
-        print("#ignore", end="")
+        file.write(b"#ignore")
     elif isinstance(obj, Inert):
-        print("#inert", end="")
+        file.write(b"#inert")
     elif isinstance(obj, Boolean):
         if obj.value:
-            print("#t", end="")
+            file.write(b"#t")
         else:
-            print("#f", end="")
+            file.write(b"#f")
     elif isinstance(obj, Pair):
-        print("(", end="")
-        _f_write(obj.car)
+        file.write(b"(")
+        _f_write(file, obj.car)
         obj_cdr = obj.cdr
         while isinstance(obj_cdr, Pair):
             obj = obj_cdr
-            print(" ", end="")
-            _f_write(obj.car)
+            file.write(b" ")
+            _f_write(file, obj.car)
             obj_cdr = obj.cdr
         if not isinstance(obj_cdr, Nil):
-            print(" . ", end="")
-            _f_write(obj_cdr)
-        print(")", end="")
+            file.write(b" . ")
+            _f_write(file, obj_cdr)
+        file.write(b")")
     else:
-        print("#unknown", end="")
+        file.write(b"#unknown")
 
-def _f_print_trace(continuation, sources=None):
+def _f_print_trace(file, continuation, sources=None):
     assert isinstance(continuation, Continuation)
     # Output stack trace in reverse order, with recent calls last
     frames = []
@@ -751,42 +763,43 @@ def _f_print_trace(continuation, sources=None):
         expr = continuation._call_info
         if expr not in sources:
             # Non-source expressions can be evaluated, usually from eval
-            print("  in unknown")
-            print("    ", end="")
-            _f_write(expr)
-            print()
+            file.write(b"  in unknown\n")
+            file.write(b"    ")
+            _f_write(file, expr)
+            file.write(b"\n")
             continue
         # Get source location of expression
         filename, start_line_no, start_char_no, end_line_no, end_char_no = sources[expr]
         if start_line_no == end_line_no:
-            line_info = "%d" % (start_line_no+1,)
+            line_info = b"%d" % (start_line_no+1,)
         else:
-            line_info = "%d:%d" % (start_line_no+1, end_line_no+1)
-        print("  in %s at %s [%d:%d]" % (filename, line_info, start_char_no+1, end_char_no+1))
+            line_info = b"%d:%d" % (start_line_no+1, end_line_no+1)
+        file.write(b"  in %s at %s [%d:%d]\n" % (filename, line_info, start_char_no+1, end_char_no+1))
         # TODO: output the actual content of the lines the expression is from
-        print("    ", end="")
-        _f_write(expr)
-        print()
+        file.write(b"    ")
+        _f_write(file, expr)
+        file.write(b"\n")
 
-def _f_format_syntax_error(error, lines, starts_at=0):
-    print("! --- syntax error ---")
-    print("  in <stdin> at %d [%d:]" % (error.line_no + 1, error.char_no + 1))
-    print("    ", end="")
-    print(_c_bytes_to_str(lines[error.line_no - starts_at]))
-    print("! syntax-error ", end="")
-    _f_write(String(error.message))
-    print()
+def _f_format_syntax_error(file, error, lines, starts_at=0):
+    file.write(b"! --- syntax error ---\n")
+    file.write(b"  in <stdin> at %d [%d:]\n" % (error.line_no + 1, error.char_no + 1))
+    file.write(b"    ")
+    file.write(lines[error.line_no - starts_at])
+    file.write(b"\n")
+    file.write(b"! syntax-error ")
+    _f_write(file, String(_c_str_to_bytes(error.message)))
+    file.write(b"\n")
 
-def _f_format_evaluation_error(error, lines, locations):
+def _f_format_evaluation_error(file, error, lines, locations):
     if error.parent is not None:
-        print("! --- stack trace ---")
+        file.write(b"! --- stack trace ---\n")
         sources = {}
         for expr, l1, c1, l2, c2 in locations:
-            sources[expr] = ("<stdin>", l1, c1, l2, c2)
-        _f_print_trace(error.parent, sources=sources)
-    print("! error ", end="")
-    _f_write(error.value)
-    print()
+            sources[expr] = (b"<stdin>", l1, c1, l2, c2)
+        _f_print_trace(file, error.parent, sources=sources)
+    file.write(b"! error ")
+    _f_write(file, error.value)
+    file.write(b"\n")
 
 # == Primitive combiners
 
@@ -1046,8 +1059,8 @@ def main(argv):
     # Start REPL if no args and is TTY
     if len(argv) == 1 and os.isatty(0):
         # REPL prompts
-        PROMPT_1 = "rf> "  # default prompt
-        PROMPT_2 = "... "  # multi-line prompt
+        PROMPT_1 = b"rf> "  # default prompt
+        PROMPT_2 = b"... "  # multi-line prompt
         prompt_list = [PROMPT_1]
         # Setup standard environment
         env = Environment({}, Environment(_DEFAULT_ENV, None))
@@ -1055,12 +1068,14 @@ def main(argv):
         lines = []
         locations = []
         parser = _InteractiveParser()
-        for line in _prompt_lines(prompt_list):
+        # Read STDIN lines one by one
+        stdin, stdout, stderr = rfile.create_stdio()
+        for line in _prompt_lines(stdin, stdout, prompt_list):
             # Attempt to lex and parse
             try:
                 done, exprs = parser.handle(line, lines=lines, locations=locations)
             except ParsingError as e:
-                _f_format_syntax_error(e, parser.last_lines, starts_at=len(lines))
+                _f_format_syntax_error(stderr, e, parser.last_lines, starts_at=len(lines))
                 prompt_list[0] = PROMPT_1
                 continue
             if not done:
@@ -1072,17 +1087,18 @@ def main(argv):
                     state = _f_toplevel_eval(env, expr)
                     value = fully_evaluate(state)
                     if not isinstance(value, Inert):
-                        _f_write(value)
-                        print()
+                        _f_write(stdout, value)
+                        stdout.write(b"\n")
             except EvaluationError as e:
-                _f_format_evaluation_error(e, lines, locations)
+                _f_format_evaluation_error(stderr, e, lines, locations)
             prompt_list[0] = PROMPT_1
         return 0
 
     # Read whole STDIN
+    stdin, stdout, stderr = rfile.create_stdio()
     parts = []
     while True:
-        part = os.read(0, 2048)
+        part = stdin.read(2048)
         if not part: break
         parts.append(part)
     text = b"".join(parts)
@@ -1097,7 +1113,7 @@ def main(argv):
         while tokens:
             exprs.append(parse(tokens, offsets=offsets, locations=locations))
     except ParsingError as e:
-        _f_format_syntax_error(e, text.split(b"\n"))
+        _f_format_syntax_error(stderr, e, text.split(b"\n"))
         return 1
     # Setup standard environment
     env = Environment({}, Environment(_DEFAULT_ENV, None))
@@ -1107,10 +1123,10 @@ def main(argv):
         try:
             value = fully_evaluate(state)
             if not isinstance(value, Inert):
-                _f_write(value)
-                print()
+                _f_write(stdout, value)
+                stdout.write(b"\n")
         except EvaluationError as e:
-            _f_format_evaluation_error(e, text.split(b"\n"), locations)
+            _f_format_evaluation_error(stderr, e, text.split(b"\n"), locations)
             return 1
     return 0
 
