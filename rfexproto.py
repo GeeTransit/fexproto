@@ -67,12 +67,12 @@ class Int(Object):
 class String(Object):
     _attrs_ = _immutable_fields_ = ("value",)
     def __init__(self, value):
-        assert isinstance(value, str)
+        assert isinstance(value, bytes)
         self.value = value
 class Symbol(Object):
     _attrs_ = _immutable_fields_ = ("name",)
     def __init__(self, name):
-        assert isinstance(name, str)
+        assert isinstance(name, bytes)
         self.name = name
 class Environment(Object):
     _immutable_fields_ = ("storage", "parent")
@@ -116,7 +116,7 @@ class PrimitiveOperative(Operative):
         try:
             return self.func(env, value, parent)
         except RuntimeError as e:
-            return f_error(parent, MutablePair(String(e.message), NIL))
+            return f_error(parent, MutablePair(String(_c_str_to_bytes(e.message)), NIL))
 class UserDefinedOperative(Operative):
     _immutable_ = True
     def __init__(self, env, envname, name, body):
@@ -193,14 +193,14 @@ EVALUATION_DONE = PrimitiveOperative(_f_evaluation_done)
 class LocalMap(object):
     _attrs_ = _immutable_fields_ = ("transitions", "indexes")
     def __init__(self):
-        self.transitions = {}  # str -> LocalMap
-        self.indexes = {}  # str -> int
+        self.transitions = {}  # bytes -> LocalMap
+        self.indexes = {}  # bytes -> int
     @jit.elidable
     def find(self, name):
         return self.indexes.get(name, -1)
     @jit.elidable
     def new_localmap_with(self, name):
-        assert isinstance(name, str)
+        assert isinstance(name, bytes)
         if name not in self.transitions:
             new = LocalMap()
             new.indexes.update(self.indexes)
@@ -331,7 +331,7 @@ def step_evaluate(state):
         assert isinstance(env, Environment)
         value = _environment_lookup(env, obj)
         if value is None:
-            return f_error(parent, MutablePair(String("binding not found"), MutablePair(obj, NIL)))
+            return f_error(parent, MutablePair(String(b"binding not found"), MutablePair(obj, NIL)))
         return f_return(parent, value)
     elif isinstance(obj, Pair):
         next_env = StepWrappedEnvironment(env, obj.cdr)
@@ -435,13 +435,28 @@ _STEP_CALL_EVCAR = PrimitiveOperative(_step_call_evcar)
 
 # == Lexing, parsing, and writing logic
 
-_TOKEN_PATTERN = re.compile("|".join([
-    r'[()]',  # open and close brackets
-    r'[^ \t\r\n();"]+',  # symbol-like tokens
-    r'"(?:[^"\\\r\n]|\\[^\r\n])*"',  # single-line strings
-    r'[ \t\r]+',  # horizontal whitespace
-    r'\n',  # newline (parsed separately to count lines)
-    r';[^\r\n]*',  # single-line comments
+if b"" == "":  # Python 2
+    def _c_char_to_len1(char): return char
+    def _c_len1_to_char(len1): return len1
+    def _c_char_to_int(char): return ord(char)
+    def _c_int_to_char(code): return chr(code)
+    def _c_join_chars(chars): return b"".join(chars)
+else:  # Python 3+
+    def _c_char_to_len1(char): return chr(char)
+    def _c_len1_to_char(len1): return ord(len1)
+    def _c_char_to_int(char): return char
+    def _c_int_to_char(code): return code
+    def _c_join_chars(chars): return bytes(chars)
+def _c_str_to_bytes(string): return _c_join_chars([_c_len1_to_char(len1) for len1 in string])
+def _c_bytes_to_str(bytes_): return "".join([_c_char_to_len1(char) for char in bytes_])
+
+_TOKEN_PATTERN = re.compile(b"|".join([
+    br'[()]',  # open and close brackets
+    br'[^ \t\r\n();"]+',  # symbol-like tokens
+    br'"(?:[^"\\\r\n]|\\[^\r\n])*"',  # single-line strings
+    br'[ \t\r]+',  # horizontal whitespace
+    br'\n',  # newline (parsed separately to count lines)
+    br';[^\r\n]*',  # single-line comments
 ]))
 def tokenize(text, offsets=None, init_line_no=0, init_char_no=0):
     result = []
@@ -454,10 +469,10 @@ def tokenize(text, offsets=None, init_line_no=0, init_char_no=0):
         if match is None:
             raise ParsingError("unknown syntax", line_no, i - line_start_i)
         token = match.group()
-        if token == "\n":
+        if token == b"\n":
             line_no += 1
             line_start_i = i + 1
-        elif token[0] not in " \t\r;":
+        elif token[0] not in b" \t\r;":
             result.append(token)
             if offsets is not None:
                 offsets.append(line_no)
@@ -465,18 +480,18 @@ def tokenize(text, offsets=None, init_line_no=0, init_char_no=0):
         i = match.end()
     return result
 
-_STRING_PATTERN = re.compile("|".join([
-    r'[^\\]',  # normal characters
-    r'\\x[a-fA-F0-9][a-fA-F0-9]',  # hex escape sequence
-    r'\\[abtnr"\\]',  # common escape sequences
+_STRING_PATTERN = re.compile(b"|".join([
+    br'[^\\]',  # normal characters
+    br'\\x[a-fA-F0-9][a-fA-F0-9]',  # hex escape sequence
+    br'\\[abtnr"\\]',  # common escape sequences
 ]))
 def parse(tokens, offsets=None, locations=None):
     token = tokens.pop()
     line_no = offsets.pop() if offsets is not None else -1
     char_no = offsets.pop() if offsets is not None else -1
-    if token == ")":
+    if token == b")":
         raise ParsingError("unmatched close bracket", line_no, char_no)
-    if token == "(":
+    if token == b"(":
         expr, _, _ = _parse_elements(
             tokens,
             offsets=offsets, locations=locations,
@@ -484,17 +499,17 @@ def parse(tokens, offsets=None, locations=None):
             first_line_no=line_no, first_char_no=char_no,
         )
         return expr
-    if token == ".":
+    if token == b".":
         raise ParsingError("unexpected dot", line_no, char_no)
-    if token == "#t" or token == "#T":
+    if token == b"#t" or token == b"#T":
         return TRUE
-    if token == "#f" or token == "#F":
+    if token == b"#f" or token == b"#F":
         return FALSE
-    if token.lower() == "#ignore":
+    if token.lower() == b"#ignore":
         return IGNORE
-    if token.lower() == "#inert":
+    if token.lower() == b"#inert":
         return INERT
-    if token[0] == '"':
+    if token[0] == b'"'[0]:
         i = 1
         len_token = len(token) - 1
         chars = []
@@ -503,20 +518,20 @@ def parse(tokens, offsets=None, locations=None):
             if match is None:
                 raise ParsingError("unknown string escape", line_no, char_no + i)
             part = match.group()
-            if part[0] != "\\":
+            if part[0] != b"\\"[0]:
                 chars.append(part[0])
-            elif part[1] == "x":
-                chars.append(chr(int(part[2]+part[3], 16)))
+            elif part[1] == b"x"[0]:
+                chars.append(_c_int_to_char(int(part[2:4], 16)))
             else:
-                chars.append('\a\b\t\n\r"\\'['abtnr"\\'.find(part[1])])
+                chars.append(b'\a\b\t\n\r"\\'[b'abtnr"\\'.find(part[1])])
             i = match.end()
-        return String("".join(chars))
-    if token[0].isdigit() or token[0] in "+-" and len(token) > 1 and token[1].isdigit():
+        return String(_c_join_chars(chars))
+    if _c_char_to_len1(token[0]).isdigit() or token[0] in b"+-" and len(token) > 1 and _c_char_to_len1(token[1]).isdigit():
         try:
             return Int(int(token))
         except ValueError:
             raise ParsingError("unknown number", line_no, char_no)
-    if token[0] != "#":
+    if token[0] != b"#"[0]:
         symbol = Symbol(token.lower())
         if locations is not None:
             locations.append((symbol, line_no, char_no, line_no, char_no + len(token)))
@@ -532,12 +547,12 @@ def _parse_elements(
     if not tokens:
         raise ParsingError("unmatched open bracket", first_line_no, first_char_no)
     token = tokens[-1]
-    if token == ")":
+    if token == b")":
         tokens.pop()
         end_line_no = offsets.pop() if offsets is not None else -1
         end_char_no = offsets.pop() if offsets is not None else -1
         return NIL, end_line_no, end_char_no
-    if token == ".":
+    if token == b".":
         if line_no == first_line_no and char_no == first_char_no:
             line_no = offsets[-1] if offsets is not None else -1
             char_no = offsets[-2] if offsets is not None else -1
@@ -548,7 +563,7 @@ def _parse_elements(
             offsets.pop()
         if not tokens:
             raise ParsingError("unmatched open bracket and missing cdr element", first_line_no, first_char_no)
-        if tokens[-1] == ")":
+        if tokens[-1] == b")":
             line_no = offsets[-1] if offsets is not None else -1
             char_no = offsets[-2] if offsets is not None else -1
             raise ParsingError("unexpected close bracket", line_no, char_no)
@@ -557,7 +572,7 @@ def _parse_elements(
             raise ParsingError("unmatched open bracket", first_line_no, first_char_no)
         end_line_no = offsets.pop() if offsets is not None else -1
         end_char_no = offsets.pop() if offsets is not None else -1
-        if tokens.pop() != ")":
+        if tokens.pop() != b")":
             raise ParsingError("expected close bracket", end_line_no, end_char_no)
         return element, end_line_no, end_char_no
     element = parse(tokens, offsets=offsets, locations=locations)
@@ -595,7 +610,7 @@ class _InteractiveParser:
         if lines is None: lines = []
         if locations is None: locations = []
         # Add line to history
-        if line and line[-1] == "\n":
+        if line and line[-1] == b"\n"[0]:
             self.curr_lines.append(line[:-1])
         else:
             self.curr_lines.append(line)
@@ -661,15 +676,15 @@ def _prompt_lines(prompt_list):
                 yield "".join(leftover)
             return
         # Split on newlines and yield each line
-        i = part.find("\n")
+        i = part.find(b"\n")
         if i < 0:
             leftover.append(part)
         else:
             leftover.append(part[:i+1])
-            yield "".join(leftover)
+            yield b"".join(leftover)
             del leftover[:]
             while True:
-                j = part.find("\n", i+1)
+                j = part.find(b"\n", i+1)
                 if j < 0:
                     if i+1 < len(part):
                         leftover.append(part[i+1:])
@@ -686,16 +701,16 @@ def _f_write(obj):
     elif isinstance(obj, String):
         print('"', end="")
         for char in obj.value:
-            code = ord(char)
-            if char in '\a\b\t\n\r"\\':  # escape sequences
-                print("\\"+'abtnr"\\'['\a\b\t\n\r"\\'.find(char)], end="")
+            code = _c_char_to_int(char)
+            if char in b'\a\b\t\n\r"\\':  # escape sequences
+                print("\\"+'abtnr"\\'[b'\a\b\t\n\r"\\'.find(char)], end="")
             elif not 32 <= code < 128:  # unprintable codes
                 print("\\x"+"0123456789abcdef"[code//16]+"0123456789abcdef"[code%16], end="")
             else:
-                print(char, end="")
+                print(_c_char_to_len1(char), end="")
         print('"', end="")
     elif isinstance(obj, Symbol):
-        print(obj.name, end="")
+        print(_c_bytes_to_str(obj.name), end="")
     elif isinstance(obj, Ignore):
         print("#ignore", end="")
     elif isinstance(obj, Inert):
@@ -757,7 +772,7 @@ def _f_format_syntax_error(error, lines, starts_at=0):
     print("! --- syntax error ---")
     print("  in <stdin> at %d [%d:]" % (error.line_no + 1, error.char_no + 1))
     print("    ", end="")
-    print(lines[error.line_no - starts_at])
+    print(_c_bytes_to_str(lines[error.line_no - starts_at]))
     print("! syntax-error ", end="")
     _f_write(String(error.message))
     print()
@@ -998,24 +1013,24 @@ def _operative_binds(env, expr, parent):
 def _primitive(num_wraps, func):
     return Combiner(num_wraps, PrimitiveOperative(func))
 _DEFAULT_ENV = {
-    "+": _primitive(1, _operative_plus),
-    "*": _primitive(1, _operative_times),
-    "<=?": _primitive(1, _operative_less_equal),
-    "eq?": _primitive(1, _operative_eq),
-    "pair?": _primitive(1, _operative_pair),
-    "cons": _primitive(1, _operative_cons),
-    "car": _primitive(1, _operative_car),
-    "cdr": _primitive(1, _operative_cdr),
-    "$vau": _primitive(0, _operative_vau),
-    "wrap": _primitive(1, _operative_wrap),
-    "unwrap": _primitive(1, _operative_unwrap),
-    "eval": _primitive(1, _operative_eval),
-    "$remote-eval": _primitive(0, _operative_remote_eval),
-    "make-environment": _primitive(1, _operative_make_environment),
-    "$define!": _primitive(0, _operative_define),
-    "$if": _primitive(0, _operative_if),
-    "$binds?": _primitive(0, _operative_binds),
-    "$jit-loop-head": Combiner(0, _F_LOOP_HEAD),
+    b"+": _primitive(1, _operative_plus),
+    b"*": _primitive(1, _operative_times),
+    b"<=?": _primitive(1, _operative_less_equal),
+    b"eq?": _primitive(1, _operative_eq),
+    b"pair?": _primitive(1, _operative_pair),
+    b"cons": _primitive(1, _operative_cons),
+    b"car": _primitive(1, _operative_car),
+    b"cdr": _primitive(1, _operative_cdr),
+    b"$vau": _primitive(0, _operative_vau),
+    b"wrap": _primitive(1, _operative_wrap),
+    b"unwrap": _primitive(1, _operative_unwrap),
+    b"eval": _primitive(1, _operative_eval),
+    b"$remote-eval": _primitive(0, _operative_remote_eval),
+    b"make-environment": _primitive(1, _operative_make_environment),
+    b"$define!": _primitive(0, _operative_define),
+    b"$if": _primitive(0, _operative_if),
+    b"$binds?": _primitive(0, _operative_binds),
+    b"$jit-loop-head": Combiner(0, _F_LOOP_HEAD),
 }
 
 # == Entry point
@@ -1070,7 +1085,7 @@ def main(argv):
         part = os.read(0, 2048)
         if not part: break
         parts.append(part)
-    text = "".join(parts)
+    text = b"".join(parts)
     # Lex and parse
     try:
         offsets = []
@@ -1082,7 +1097,7 @@ def main(argv):
         while tokens:
             exprs.append(parse(tokens, offsets=offsets, locations=locations))
     except ParsingError as e:
-        _f_format_syntax_error(e, text.split("\n"))
+        _f_format_syntax_error(e, text.split(b"\n"))
         return 1
     # Setup standard environment
     env = Environment({}, Environment(_DEFAULT_ENV, None))
@@ -1095,7 +1110,7 @@ def main(argv):
                 _f_write(value)
                 print()
         except EvaluationError as e:
-            _f_format_evaluation_error(e, text.split("\n"), locations)
+            _f_format_evaluation_error(e, text.split(b"\n"), locations)
             return 1
     return 0
 
