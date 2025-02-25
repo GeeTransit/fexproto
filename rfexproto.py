@@ -1081,6 +1081,7 @@ def main(argv):
                 done, exprs = parser.handle(line, lines=lines, locations=locations)
             except ParsingError as e:
                 _f_format_syntax_error(stderr, e, parser.last_lines, starts_at=len(lines))
+                stderr.flush()
                 prompt_list[0] = PROMPT_1
                 continue
             if not done:
@@ -1094,8 +1095,10 @@ def main(argv):
                     if not isinstance(value, Inert):
                         _f_write(stdout, value)
                         stdout.write(b"\n")
+                        stdout.flush()
             except EvaluationError as e:
                 _f_format_evaluation_error(stderr, e, lines, locations)
+                stderr.flush()
             prompt_list[0] = PROMPT_1
         return 0
 
@@ -1119,6 +1122,7 @@ def main(argv):
             exprs.append(parse(tokens, offsets=offsets, locations=locations))
     except ParsingError as e:
         _f_format_syntax_error(stderr, e, text.split(b"\n"))
+        stderr.flush()
         return 1
     # Setup standard environment
     env = Environment({}, Environment(_DEFAULT_ENV, None))
@@ -1130,8 +1134,10 @@ def main(argv):
             if not isinstance(value, Inert):
                 _f_write(stdout, value)
                 stdout.write(b"\n")
+                stdout.flush()
         except EvaluationError as e:
             _f_format_evaluation_error(stderr, e, text.split(b"\n"), locations)
+            stderr.flush()
             return 1
     return 0
 
