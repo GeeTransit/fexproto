@@ -108,7 +108,7 @@ class Continuation(Object):
         self._should_enter = False
         self._call_info = None
 class Combiner(Object):
-    _attrs_ = _immutable_fields_ = ("num_wraps", "operative")
+    _immutable_fields_ = ("num_wraps", "operative")
     def __init__(self, num_wraps, operative):
         self.num_wraps = num_wraps
         self.operative = operative
@@ -203,24 +203,42 @@ EVALUATION_DONE = PrimitiveOperative(_f_evaluation_done)
 # We assume that most environments assign the same variables in the same order.
 # This lets us optimize local variable lookups to be just an array access. See
 # https://pypy.org/posts/2011/03/controlling-tracing-of-interpreter-with_21-6524148550848694588.html
+
+# Also note that we are using symbols themselves as keys, not the name. The
+# idea is that different functions which happen to share the same variable
+# names shouldn't be handled the same.
+
+# These are placeholder values for a binding's known value.
+_INITIAL = Object()  # Just initialized
+_MUTATED = Object()  # Symbol gets assigned different values
+
 class LocalMap(object):
-    _attrs_ = _immutable_fields_ = ("transitions", "indexes")
-    def __init__(self):
-        self.transitions = {}  # bytes -> LocalMap
-        self.indexes = {}  # bytes -> int
+    _immutable_fields_ = ("transitions", "symbol", "index", "parent", "known_value?")
+    def __init__(self, symbol, index, parent):
+        self.transitions = {}  # Symbol -> LocalMap
+        assert symbol is None or isinstance(symbol, Symbol)
+        self.symbol = symbol
+        assert isinstance(index, int)
+        self.index = index
+        assert parent is None or isinstance(parent, LocalMap)
+        self.parent = parent
+        self.known_value = _INITIAL
     @jit.elidable
     def find(self, name):
-        return self.indexes.get(name, -1)
+        # TODO: Optimize lookups when not JIT-ed
+        if self.symbol is None:
+            return None
+        if self.symbol.name == name:
+            return self
+        return self.parent.find(name)
     @jit.elidable
     def new_localmap_with(self, name):
-        assert isinstance(name, bytes)
+        assert isinstance(name, Symbol)
         if name not in self.transitions:
-            new = LocalMap()
-            new.indexes.update(self.indexes)
-            new.indexes[name] = len(self.indexes)
+            new = LocalMap(name, self.index + 1, self)
             self.transitions[name] = new
         return self.transitions[name]
-_ROOT_LOCALMAP = LocalMap()
+_ROOT_LOCALMAP = LocalMap(None, -1, None)
 
 @jit.unroll_safe
 def _environment_tostoragemap(bindings):
@@ -228,15 +246,21 @@ def _environment_tostoragemap(bindings):
     localmap = _ROOT_LOCALMAP
     if bindings is not None and len(bindings) > 0:
         for key, value in bindings.items():  # TODO: should we sort?
-            localmap = localmap.new_localmap_with(key)
+            # TODO: How to ensure same logic as in _environment_update?
+            localmap = localmap.new_localmap_with(Symbol(key))
+            if localmap.known_value is _INITIAL:
+                localmap.known_value = value
+            elif localmap.known_value is _MUTATED:
+                pass
+            elif localmap.known_value is not value:
+                localmap.known_value = _MUTATED
             storage.append(value)
     return storage, localmap
 
 @jit.unroll_safe
 def _environment_lookup(env, name):
-    # TODO: how to optimize constants? (usually global functions) Maybe look
-    # into how PyPy stores metadata about variables' types, whether it gets
-    # reassigned, and maybe even nested environments' types.
+    if not jit.isvirtual(name):
+        jit.promote(name)
     name_name = name.name
     if not jit.isvirtual(name_name):
         jit.promote_string(name_name)
@@ -244,21 +268,36 @@ def _environment_lookup(env, name):
         # Promote the local map since the combiner calls should be the same,
         # hence variable lookups should be on the same lexical environments.
         jit.promote(env.localmap)
-        index = env.localmap.find(name_name)
-        if index >= 0:
-            return env.storage[index]
+        attr = env.localmap.find(name_name)
+        if attr is not None:
+            # If the binding is a constant, return the known value
+            if attr.known_value is not _INITIAL and attr.known_value is not _MUTATED:
+                return attr.known_value
+            return env.storage[attr.index]
         env = env.parent
     return None
 
 def _environment_update(env, name, value):
+    if not jit.isvirtual(name):
+        jit.promote(name)
     name_name = name.name
     if not jit.isvirtual(name_name):
         jit.promote_string(name_name)
-    index = env.localmap.find(name_name)
-    if index >= 0:
-        env.storage[index] = value
+    attr = env.localmap.find(name_name)
+    if attr is not None:
+        # Invalidate traces if the binding differs from the previous constant
+        if attr.known_value is not _MUTATED and attr.known_value is not value:
+            attr.known_value = _MUTATED
+        env.storage[attr.index] = value
     else:
-        env.localmap = env.localmap.new_localmap_with(name_name)
+        attr = env.localmap = env.localmap.new_localmap_with(name)
+        # Initialize binding's known value, otherwise invalidate if different
+        if attr.known_value is _INITIAL:
+            attr.known_value = value
+        elif attr.known_value is _MUTATED:
+            pass
+        elif attr.known_value is not value:
+            attr.known_value = _MUTATED
         env.storage.append(value)
 
 # Specialized environments
