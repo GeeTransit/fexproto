@@ -330,6 +330,15 @@ def _step_call_evcar(static, value, parent):
     continuation = Continuation(env, _step_eval, continuation)
     return continuation, eval_arg.car.car
 
+def _f_binds(static, env, parent):
+    expr = static.bindings["name"]
+    # Note: same logic as in _step_eval
+    while env is not Environment.ROOT:
+        if expr in env.bindings:
+            return parent, True
+        env = env.parent
+    return parent, False
+
 # modify environment according to name
 def _f_define(static, expr, parent):
     env = static.bindings["env"]
@@ -480,6 +489,13 @@ def _f_sequence_inert(env, expr, parent):
     continuation._call_info = ["eval sequence inert", seq_exprs.car]  # non-tail call
     continuation = Continuation(seq_env, _step_eval, continuation)
     return continuation, seq_exprs.car
+
+def _operative_binds(env, expr, parent):
+    next_env = Environment({"name": expr.cdr.car}, Environment.ROOT)
+    continuation = Continuation(next_env, _f_binds, parent)
+    continuation._call_info = ["binds env", expr.car]  # non-tail call
+    continuation = Continuation(env, _step_eval, continuation)
+    return continuation, expr.car
 
 def _operative_number(env, expr, parent):
     return parent, type(expr.car) in (int, float)
@@ -708,6 +724,7 @@ def _operative_string_to_list(env, expr, parent):
     return parent, chars
 
 _DEFAULT_ENV = {
+    "$binds?": Combiner(0, _operative_binds),  # Useful for feature testing
     "number?": Combiner(1, _operative_number),
     "symbol?": Combiner(1, _operative_symbol),
     "symbol->string": Combiner(1, _operative_symbol_to_string),
