@@ -1,8 +1,9 @@
 ; This is based on John Shutt's derivation of $sequence in [1] from primitive
 ; features. Modifications include the different parameters for $vau and $eval,
 ; the lack of recursive parameter tree binding, the lack of null? (which can be
-; derived from eq?), the addition of eval-inplace for better debug stack
-; traces, and a bug fix for late binding of $vau in $seq2.
+; derived from eq?), the evaluation of expressions as arguments for better
+; debug stack traces, a bug fix for late binding of $vau in $seq2, and a
+; workaround to disable promotion of the recursive call expression.
 ;
 ; [1] J. N. Shutt, "Revised^-1 Report on the Kernel Programming Language",
 ;     Worcester Polytechnic Institute, Worcester, MA, Tech. Report.
@@ -10,27 +11,30 @@
 ;     https://ftp.cs.wpi.edu/pub/techreports/pdf/05-07.pdf. [Accessed: 8 Mar.
 ;     2025]
 ($define! $sequence
-	((wrap ($vau (#ignore eval-inplace.)
+	((wrap ($vau (#ignore list.)
 			((wrap ($vau (#ignore $seq2.)
 					((car $seq2.)
 						($define! $aux
 							($vau (env head.tail)
 								($if (eq? () (cdr head.tail))
 									(eval env (car head.tail))
-									((car $seq2.)
-										((car eval-inplace.) env (car head.tail))
-										(eval env (cons $aux (cdr head.tail)))))))
+									(eval env ((car list.) (car $seq2.)
+										(car head.tail)
+										(cons $aux (cdr head.tail)))))))
 						($vau (env body)
 							($if (eq? () body)
 								#inert
 								(eval env (cons $aux body)))))))
 				((wrap ($vau (#ignore $vau.)
 						($vau (env first.second.)
-							((wrap ((car $vau.) (#ignore #ignore) (eval env (car (cdr first.second.)))))
-								((car eval-inplace.) env (car first.second.))))))
+							(eval env ((car list.)
+								(wrap ((car $vau.) (#ignore #ignore)
+									(eval env (cons
+										(car (car (cdr first.second.)))
+										(cdr (car (cdr first.second.)))))))
+								(car first.second.))))))
 					$vau))))
-		($vau (dyn env.expr.)
-			(eval dyn (cons $remote-eval (cons (car env.expr.) (cons (eval dyn (car (cdr env.expr.))) ())))))))
+		(wrap ($vau (#ignore args) args))))
 
 ; Simple tail recursive function where (sumto n 0) returns the sum of 1 to n
 ($define! sumto (wrap ($vau (#ignore args)
