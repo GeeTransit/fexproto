@@ -26,6 +26,8 @@ except ImportError:
         @staticmethod
         def isvirtual(arg): return False
         @staticmethod
+        def isconstant(arg): return False
+        @staticmethod
         def we_are_jitted(): return False
     class objectmodel(object):
         class specialize(object):
@@ -364,7 +366,7 @@ def f_error(parent, value):
 def f_eval(env, obj, parent=None):
     # Don't let the JIT driver promote virtuals (such as mutable pairs
     # constructed at runtime)
-    if jit.isvirtual(obj):
+    if not jit.isconstant(obj):
         next_continuation = Continuation(env, _STEP_EVAL, parent)
         return f_return(next_continuation, obj)
     return obj, env, parent
