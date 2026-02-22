@@ -25,6 +25,8 @@ except ImportError:
         def unroll_safe(func): return func
         @staticmethod
         def isvirtual(arg): return False
+        @staticmethod
+        def we_are_jitted(): return False
     class objectmodel(object):
         class specialize(object):
             @staticmethod
@@ -137,7 +139,7 @@ class UserDefinedOperative(Operative):
         self.env = env
         assert isinstance(envname, Symbol) or isinstance(envname, Ignore)
         self.envname = envname
-        assert isinstance(name, Symbol) or isinstance(name, Ignore)
+        assert not isinstance(name, MutablePair)
         self.name = name
         assert not isinstance(body, MutablePair)
         self.body = body
@@ -147,8 +149,10 @@ class UserDefinedOperative(Operative):
         if isinstance(envname, Symbol):
             _environment_update(call_env, envname, env)
         name = self.name
-        if isinstance(name, Symbol):
-            _environment_update(call_env, name, value)
+        try:
+            _define(call_env, name, value)
+        except RuntimeError as e:
+            return f_error(parent, MutablePair(String(_c_str_to_bytes(e.message)), NIL))
         return f_eval(call_env, self.body, parent)
 
 def _f_noop(env, expr, parent):
@@ -948,9 +952,9 @@ def _operative_vau(env, expr, parent):
     envname_name, body = _unpack2(expr, _ERROR)
     envname, name = _unpack2(envname_name, _ERROR)
     if not isinstance(envname, Symbol) and not isinstance(envname, Ignore): raise RuntimeError(_ERROR)
-    if not isinstance(name, Symbol) and not isinstance(name, Ignore): raise RuntimeError(_ERROR)
+    immutable_name = _f_copy_immutable(name)
     immutable_body = _f_copy_immutable(body)
-    return f_return(parent, Combiner(0, UserDefinedOperative(env, envname, name, immutable_body)))
+    return f_return(parent, Combiner(0, UserDefinedOperative(env, envname, immutable_name, immutable_body)))
 
 # (wrap combiner)
 def _operative_wrap(env, expr, parent):
@@ -1004,20 +1008,106 @@ def _operative_make_environment(env, expr, parent):
     return f_return(parent, Environment({}, environment))
 
 # ($define! name value)
+def _define_recursively_set(env, name, value, visited_names):
+    if isinstance(name, Ignore):
+        return
+    if isinstance(name, Nil):
+        if not isinstance(value, Nil):
+            raise RuntimeError("parameter tree could not be matched to value")
+        return
+    if isinstance(name, Symbol):
+        if name.name in visited_names:
+            raise RuntimeError("parameter tree symbol occurs more than once")
+        visited_names[name.name] = True
+        _environment_update(env, name, value)
+        return
+    if isinstance(name, Pair):
+        if not isinstance(value, Pair):
+            raise RuntimeError("parameter tree could not be matched to value")
+        _define_recursively_set(env, name.car, value.car, visited_names)
+        _define_recursively_set(env, name.cdr, value.cdr, visited_names)
+        return
+    raise RuntimeError("parameter tree consists of invalid types")
+@jit.unroll_safe
+def _define_recursively_list(env, name, value, visited_names):
+    if isinstance(name, Ignore):
+        return
+    if isinstance(name, Nil):
+        if not isinstance(value, Nil):
+            raise RuntimeError("parameter tree could not be matched to value")
+        return
+    if isinstance(name, Symbol):
+        for visited_name in visited_names:
+            if name.name == visited_name:
+                raise RuntimeError("parameter tree symbol occurs more than once")
+        visited_names.append(name.name)
+        _environment_update(env, name, value)
+        return
+    if isinstance(name, Pair):
+        if not isinstance(value, Pair):
+            raise RuntimeError("parameter tree could not be matched to value")
+        _define_recursively_list(env, name.car, value.car, visited_names)
+        _define_recursively_list(env, name.cdr, value.cdr, visited_names)
+        return
+    raise RuntimeError("parameter tree consists of invalid types")
+@jit.unroll_safe
+def _define_recursively_check(name, visited_names):
+    if isinstance(name, Ignore):
+        return
+    if isinstance(name, Nil):
+        return
+    if isinstance(name, Symbol):
+        for visited_name in visited_names:
+            if name.name == visited_name:
+                return "parameter tree symbol occurs more than once"
+        visited_names.append(name.name)
+        return
+    if isinstance(name, Pair):
+        _define_recursively_check(name.car, visited_names)
+        _define_recursively_check(name.cdr, visited_names)
+        return
+    return "parameter tree consists of invalid types"
+def _define_recursively_nocheck(env, name, value):
+    if isinstance(name, Ignore):
+        return
+    if isinstance(name, Nil):
+        if not isinstance(value, Nil):
+            raise RuntimeError("parameter tree could not be matched to value")
+        return
+    if isinstance(name, Symbol):
+        _environment_update(env, name, value)
+        return
+    if isinstance(name, Pair):
+        if not isinstance(value, Pair):
+            raise RuntimeError("parameter tree could not be matched to value")
+        _define_recursively_nocheck(env, name.car, value.car)
+        _define_recursively_nocheck(env, name.cdr, value.cdr)
+        return
+    raise RuntimeError("parameter tree consists of invalid types")
+@jit.elidable
+def _define_check_valid_elidable(name):
+    return _define_recursively_check(name, [])
+def _define(env, name, value):
+    if not jit.we_are_jitted():
+        _define_recursively_set(env, name, value, {})
+    elif jit.isvirtual(name) or isinstance(name, MutablePair):
+        _define_recursively_list(env, name, value, [])
+    else:
+        message = _define_check_valid_elidable(name)
+        if message is not None:
+            raise RuntimeError(message)
+        _define_recursively_nocheck(env, name, value)
 def _f_define(static, value, parent):
     assert isinstance(static, FDefineEnvironment)
     env = static.env
     assert isinstance(env, Environment)
     name = static.name
-    assert isinstance(name, Symbol) or isinstance(name, Ignore)
-    if isinstance(name, Symbol):
-        _environment_update(env, name, value)
+    _define(env, name, value)
     return f_return(parent, INERT)
 _F_DEFINE = PrimitiveOperative(_f_define)
 def _operative_define(env, expr, parent):
     _ERROR = "expected ($define! PARAM ANY)"
     name, value = _unpack2(expr, _ERROR)
-    if not isinstance(name, Symbol) and not isinstance(name, Ignore): raise RuntimeError(_ERROR)
     next_env = FDefineEnvironment(env, name)
     next_continuation = Continuation(next_env, _F_DEFINE, parent)
     next_continuation._call_info = value
