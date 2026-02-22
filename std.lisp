@@ -34,44 +34,11 @@
 							(eval env (car (cdr a-b)))))
 						(car a-b))))))
 			$vau)))
-($define! $define!
-	(($vau (_1 _2) ($sequence
-		($define! $basic-define! $define!)
-		($define! $aux-define! ($vau (env name-val) ($sequence
-			($basic-define! name (car name-val))
-			($basic-define! val (car (cdr name-val)))
-			($if (eq? name #ignore)
-				#inert
-				($if (eq? name ())
-					($if (eq? val ())
-						#inert
-						(error "expected\x20nil\x20match,\x20got:\x20" val))
-					($if (pair? name)
-						($if (pair? val)
-							($sequence
-								(eval env (list $aux-define! (car name) (car val)))
-								(eval env (list $aux-define! (cdr name) (cdr val))))
-							(error "expected\x20cons\x20match\x20on\x20" name ",\x20got\x20" val))
-						(eval env (list $basic-define! name (cons (unwrap list) val)))))))))
-		($vau (env name-expr)
-			($if (eq? (cdr (cdr name-expr)) ())
-				(eval env (list
-					$aux-define!
-					(car name-expr)
-					(eval env (car (cdr name-expr)))))
-				(error "expected\x20only\x20two\x20arguments")))))))
 ($define! $vau
-	(($vau (_1 _2) ($sequence
-		($define! $basic-vau $vau)
-		($vau (static name-body)
-			($sequence
-				($define! name (copy-es-immutable (car name-body)))
-				($define! body (copy-es-immutable (cdr name-body)))
-				($basic-vau (dyn val)
-					($sequence
-						($define! env (make-environment static))
-						(eval env (list $define! name (list (unwrap list) dyn val)))
-						(eval env (cons $sequence body))))))))))
+  ((wrap ($vau (#ignore ($basic-vau))
+      ($vau (static (name . body))
+        (eval static (list $basic-vau name (cons $sequence body))))))
+    $vau))
 ($define! get-current-environment (wrap ($vau (env ()) env)))
 ($define! $lambda
 	($vau (static (name . body))

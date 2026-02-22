@@ -28,16 +28,17 @@ class Operative:
     def __init__(self, env, envname, name, body):
         assert type(env) is Environment, f'env must be type Environment, got: {type(env)}'
         self.env = env  # static environment (at time of declaration)
-        assert type(envname) is str, f'envname must be type str, got: {type(envname)}'
+        assert type(envname) is str or type(envname) is type(...), f'envname must be type str or Ellipsis, got: {type(envname)}'
         self.envname = envname  # name for dynamic environment
-        assert type(name) is str, f'name must be type str, got: {type(name)}'
         self.name = name  # name for call arguments
         self.body = body  # function body
     def __call__(self, dyn, args, parent):
         # dyn is dynamic environment (at time of call)
         # args is call arguments
         # parent is parent continuation
-        call_env = Environment({self.envname: dyn, self.name: args}, self.env)
+        call_env = Environment({}, self.env)
+        _define(call_env, self.envname, dyn)
+        _define(call_env, self.name, args)
         continuation = Continuation(call_env, _step_eval, parent)
         return continuation, self.body
 _f_passthrough = Operative(Environment.ROOT, "_", "value", "value")
@@ -330,6 +331,27 @@ def _step_call_evcar(static, value, parent):
     continuation = Continuation(env, _step_eval, continuation)
     return continuation, eval_arg.car.car
 
+def _define(env, name, expr, seen=None):
+    if seen is None:
+        seen = set()
+    if type(name) is Pair:
+        assert id(name) not in seen, "parameter tree consists of self-referencing pairs"
+        seen.add(id(name))
+        assert type(expr) is Pair, "parameter tree could not be matched to value"
+        _define(env, name.car, expr.car, seen)
+        _define(env, name.cdr, expr.cdr, seen)
+        seen.discard(id(name))
+    elif type(name) is type(...):
+        pass
+    elif type(name) is tuple:
+        assert type(expr) is tuple, "parameter tree could not be matched to value"
+    elif type(name) is str:
+        assert name not in seen, "parameter tree symbol occurs more than once"
+        seen.add(name)
+        env.bindings[name] = expr
+    else:
+        assert False, "parameter tree consists of invalid types"
+
 def _f_binds(static, env, parent):
     expr = static.bindings["name"]
     # Note: same logic as in _step_eval
@@ -343,7 +365,7 @@ def _f_binds(static, env, parent):
 def _f_define(static, expr, parent):
     env = static.bindings["env"]
     name = static.bindings["name"]
-    env.bindings[name] = expr
+    _define(env, name, expr)
     return parent, None
 
 def _f_if(env, result, parent):
