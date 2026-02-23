@@ -799,6 +799,12 @@ def _f_write(file, obj):
             file.write(b" . ")
             _f_write(file, obj_cdr)
         file.write(b")")
+    elif isinstance(obj, Environment):
+        file.write(b"#environment")
+    elif isinstance(obj, Continuation):
+        file.write(b"#continuation")
+    elif isinstance(obj, Combiner):
+        file.write(b"#combiner")
     else:
         file.write(b"#unknown")
 
