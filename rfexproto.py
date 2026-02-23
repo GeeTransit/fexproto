@@ -219,7 +219,7 @@ _INITIAL = Object()  # Just initialized
 _MUTATED = Object()  # Symbol gets assigned different values
 
 class LocalMap(object):
-    _immutable_fields_ = ("transitions", "symbol", "index", "parent", "known_value?")
+    _immutable_fields_ = ("transitions", "symbol", "index", "parent", "known_value?", "cached_attrs")
     def __init__(self, symbol, index, parent):
         self.transitions = {}  # Symbol -> LocalMap
         assert symbol is None or isinstance(symbol, Symbol)
@@ -229,14 +229,21 @@ class LocalMap(object):
         assert parent is None or isinstance(parent, LocalMap)
         self.parent = parent
         self.known_value = _INITIAL
+        self.cached_attrs = {}
     @jit.elidable
     def find(self, name):
-        # TODO: Optimize lookups when not JIT-ed
+        assert isinstance(name, bytes)
+        if name in self.cached_attrs:
+            return self.cached_attrs[name]
+        attr = self._find(name)
+        self.cached_attrs[name] = attr
+        return attr
+    def _find(self, name):
         if self.symbol is None:
             return None
         if self.symbol.name == name:
             return self
-        return self.parent.find(name)
+        return self.parent._find(name)
     @jit.elidable
     def new_localmap_with(self, name):
         assert isinstance(name, Symbol)
