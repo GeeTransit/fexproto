@@ -1043,28 +1043,29 @@ def _operative_less_equal(env, expr, parent):
     return f_return(parent, TRUE if a.value <= b.value else FALSE)
 
 # (eq? a b)
-def _operative_eq(env, expr, parent):
-    _ERROR = "expected (eq? ANY ANY)"
-    a, b = _unpack2(expr, _ERROR)
+def _eq(a, b):
     if False:
         pass
     elif isinstance(a, Nil):
-        result = TRUE if isinstance(b, Nil) else FALSE
+        return isinstance(b, Nil)
     elif isinstance(a, Ignore):
-        result = TRUE if isinstance(b, Ignore) else FALSE
+        return isinstance(b, Ignore)
     elif isinstance(a, Inert):
-        result = TRUE if isinstance(b, Inert) else FALSE
+        return isinstance(b, Inert)
     elif isinstance(a, Boolean):
-        result = TRUE if isinstance(b, Boolean) and a.value == b.value else FALSE
+        return isinstance(b, Boolean) and a.value == b.value
     elif isinstance(a, Int):
-        result = TRUE if isinstance(b, Int) and a.value == b.value else FALSE
+        return isinstance(b, Int) and a.value == b.value
     elif isinstance(a, Symbol):
-        result = TRUE if isinstance(b, Symbol) and a.name == b.name else FALSE
+        return isinstance(b, Symbol) and a.name == b.name
     elif isinstance(a, String):
-        result = TRUE if isinstance(b, String) and a.value == b.value else FALSE
+        return isinstance(b, String) and a.value == b.value
     else:
-        result = TRUE if a is b else FALSE
-    return f_return(parent, result)
+        return a is b
+def _operative_eq(env, expr, parent):
+    _ERROR = "expected (eq? ANY ANY)"
+    a, b = _unpack2(expr, _ERROR)
+    return f_return(parent, TRUE if _eq(a, b) else FALSE)
 
 # (pair? expr)
 def _operative_pair(env, expr, parent):
@@ -1091,6 +1092,27 @@ def _operative_cdr(env, expr, parent):
     pair = _unpack1(expr, _ERROR)
     if not isinstance(pair, Pair): raise RuntimeError(_ERROR)
     return f_return(parent, pair.cdr)
+
+# (equal? a b)
+def _equal_recursively_set(a, b, visited):
+    if not isinstance(a, Pair) or not isinstance(b, Pair):
+        return _eq(a, b)
+    # a and b are pairs
+    if (a, b) in visited:
+        return True
+    visited[(a, b)] = True
+    if not _equal_recursively_set(a.car, b.car, visited):
+        return False
+    if not _equal_recursively_set(a.cdr, b.cdr, visited):
+        return False
+    visited.pop((a, b))
+    return True
+def _equal(a, b):
+    return _equal_recursively_set(a, b, {})
+def _operative_equal(env, expr, parent):
+    _ERROR = "expected (equal? ANY ANY)"
+    a, b = _unpack2(expr, _ERROR)
+    return f_return(parent, TRUE if _equal(a, b) else FALSE)
 
 # (set-car! pair car)
 def _operative_set_car(env, expr, parent):
@@ -1341,6 +1363,7 @@ _DEFAULT_ENV = {
     b"cons": _primitive(1, _operative_cons),
     b"car": _primitive(1, _operative_car),
     b"cdr": _primitive(1, _operative_cdr),
+    b"equal?": _primitive(1, _operative_equal),
     b"set-car!": _primitive(1, _operative_set_car),
     b"set-cdr!": _primitive(1, _operative_set_cdr),
     b"$vau": _primitive(0, _operative_vau),

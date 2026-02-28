@@ -332,6 +332,26 @@ def _step_call_evcar(static, value, parent):
     continuation = Continuation(env, _step_eval, continuation)
     return continuation, eval_arg.car.car
 
+def _equal(a, b, seen=None):
+    if seen is None:
+        seen = set()
+    if type(a) != type(b):
+        return False
+    if type(a) in (str, int, float, bytes, Character):
+        return a == b
+    if type(a) is not Pair:
+        return a is b
+    key = (id(a), id(b))
+    if key in seen:
+        return True
+    seen.add(key)
+    if not _equal(a.car, b.car, seen=seen):
+        return False
+    if not _equal(a.cdr, b.cdr, seen=seen):
+        return False
+    seen.discard(key)
+    return True
+
 def _define(env, name, expr, seen=None):
     if seen is None:
         seen = set()
@@ -618,6 +638,9 @@ def _operative_eq(env, expr, parent):
         else expr.car is expr.cdr.car
     )
 
+def _operative_equal(env, expr, parent):
+    return parent, _equal(expr.car, expr.cdr.car)
+
 def _operative_pair(env, expr, parent):
     return parent, type(expr.car) is Pair
 
@@ -769,6 +792,7 @@ _DEFAULT_ENV = {
     "load": Combiner(1, _operative_load),
     "$if": Combiner(0, _operative_if),
     "eq?": Combiner(1, _operative_eq),
+    "equal?": Combiner(1, _operative_equal),
     "pair?": Combiner(1, _operative_pair),
     "environment?": Combiner(1, _operative_environment),
     "make-environment": Combiner(1, _operative_make_environment),
