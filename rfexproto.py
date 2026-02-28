@@ -164,13 +164,33 @@ def _f_noop(env, expr, parent):
     return f_return(parent, expr)
 NOOP = PrimitiveOperative(_f_noop)
 
-def _f_copy_immutable(expr):
+def _copy_immutable_recursively_set(expr, visited):
     if not isinstance(expr, MutablePair):
         return expr
-    # TODO: when mutation is introduced, support self-referencing structures
-    car = _f_copy_immutable(expr.car)
-    cdr = _f_copy_immutable(expr.cdr)
-    return ImmutablePair(car, cdr)
+    if expr in visited:
+        return visited[expr]
+    pair = ImmutablePair(NIL, NIL)
+    visited[expr] = pair
+    pair.car = _copy_immutable_recursively_set(expr.car, visited)
+    pair.cdr = _copy_immutable_recursively_set(expr.cdr, visited)
+    return pair
+@jit.unroll_safe
+def _copy_immutable_recursively_list(expr, visited):
+    if not isinstance(expr, MutablePair):
+        return expr
+    for before, after in visited:
+        if expr is before:
+            return after
+    pair = ImmutablePair(NIL, NIL)
+    visited.append((expr, pair))
+    pair.car = _copy_immutable_recursively_list(expr.car, visited)
+    pair.cdr = _copy_immutable_recursively_list(expr.cdr, visited)
+    return pair
+def _f_copy_immutable(expr):
+    if not jit.we_are_jitted():
+        return _copy_immutable_recursively_set(expr, {})
+    else:
+        return _copy_immutable_recursively_list(expr, [])
 
 # Exceptions
 
@@ -325,14 +345,15 @@ class StepWrappedEnvironment(Environment):
         self.env = env
         self.args = args
 class StepEvCarEnvironment(Environment):
-    _immutable_fields_ = Environment._immutable_fields_ + ("env", "operative", "num_wraps", "todo", "p", "i", "res")
-    def __init__(self, env, operative, num_wraps, todo, p, i, res):
+    _immutable_fields_ = Environment._immutable_fields_ + ("env", "operative", "num_wraps", "todo", "p", "c", "i", "res")
+    def __init__(self, env, operative, num_wraps, todo, p, c, i, res):
         Environment.__init__(self, None, None)
         self.env = env
         self.operative = operative
         self.num_wraps = num_wraps
         self.todo = todo
         self.p = p
+        self.c = c
         self.i = i
         self.res = res
 class FRemoteEvalEnvironment(Environment):
@@ -453,13 +474,43 @@ def _step_call_wrapped(static, combiner, parent):
         jit.promote(combiner.operative)
     if combiner.num_wraps == 0 or isinstance(args, Nil):
         return f_return(Continuation(env, combiner.operative, parent), args)
-    c = args; p = 0
-    while isinstance(c, Pair): p += 1; c = c.cdr
-    if not isinstance(c, Nil):
+    # Brent's cycle finding algorithm
+    x = y = args
+    step = 1
+    c = a = 0
+    while isinstance(x, Pair):
+        x = x.cdr
+        c += 1
+        if x == y:  # cycle of length c found
+            x = y = args
+            for _ in range(c):
+                assert isinstance(x, Pair)
+                x = x.cdr
+            a = 0
+            while x != y:
+                assert isinstance(x, Pair)
+                assert isinstance(y, Pair)
+                x = x.cdr
+                y = y.cdr
+                a += 1
+            p = a + c
+            n = 0
+            break
+        if c == step:
+            step *= 2
+            y = x
+            a += c
+            c = 0
+    else:  # acyclic args
+        a += c
+        p = a
+        c = 0
+        n = 1 if isinstance(x, Nil) else 0
+    if c == 0 and n == 0:
         raise RuntimeError("applicative call args must be proper list")
     assert isinstance(args, Pair)
     next_expr = args.car
-    next_env = StepEvCarEnvironment(env, combiner.operative, combiner.num_wraps, args.cdr, p, 0, NIL)
+    next_env = StepEvCarEnvironment(env, combiner.operative, combiner.num_wraps, args.cdr, p, c, 0, NIL)
     next_continuation = Continuation(next_env, _STEP_CALL_EVCAR, parent)
     next_continuation._call_info = next_expr
     return f_eval(env, next_expr, next_continuation)
@@ -478,6 +529,8 @@ def _step_call_evcar(static, value, parent):
     assert isinstance(todo, Nil) or isinstance(todo, Pair)
     p = static.p
     assert isinstance(p, int)
+    c = static.c
+    assert isinstance(c, int)
     i = static.i
     assert isinstance(i, int)
     res = static.res
@@ -487,14 +540,24 @@ def _step_call_evcar(static, value, parent):
     if i == p:
         i = 0
         num_wraps = num_wraps - 1
-        assert isinstance(todo, Nil)
+        if c == 0:
+            assert isinstance(todo, Nil)
+        else:
+            up = todo = MutablePair(NIL, NIL)
+            for _ in range(c-1): assert isinstance(res, Pair); todo = MutablePair(res.car, todo); res = res.cdr
+            assert isinstance(res, Pair)
+            up.car = res.car
+            up.cdr = todo
+            res = res.cdr
+            todo = up
+            p -= c
         for _ in range(p): assert isinstance(res, Pair); todo = MutablePair(res.car, todo); res = res.cdr
         assert isinstance(todo, Pair)
         if num_wraps == 0:
             continuation = Continuation(env, operative, parent)
             return f_return(continuation, todo)
     assert isinstance(todo, Pair)
-    next_env = StepEvCarEnvironment(env, operative, num_wraps, todo.cdr, p, i, res)
+    next_env = StepEvCarEnvironment(env, operative, num_wraps, todo.cdr, p, c, i, res)
     next_expr = todo.car
     next_continuation = Continuation(next_env, _STEP_CALL_EVCAR, parent)
     next_continuation._call_info = next_expr
@@ -553,7 +616,7 @@ _STRING_PATTERN = re.compile(b"|".join([
     br'\\x[a-fA-F0-9][a-fA-F0-9]',  # hex escape sequence
     br'\\[abtnr"\\]',  # common escape sequences
 ]))
-def parse(tokens, offsets=None, locations=None):
+def parse(tokens, offsets=None, locations=None, depth=0, upcons=None):
     token = tokens.pop()
     line_no = offsets.pop() if offsets is not None else -1
     char_no = offsets.pop() if offsets is not None else -1
@@ -563,6 +626,7 @@ def parse(tokens, offsets=None, locations=None):
         expr, _, _ = _parse_elements(
             tokens,
             offsets=offsets, locations=locations,
+            depth=depth, upcons=upcons,
             line_no=line_no, char_no=char_no,
             first_line_no=line_no, first_char_no=char_no,
         )
@@ -577,6 +641,20 @@ def parse(tokens, offsets=None, locations=None):
         return IGNORE
     if token.lower() == b"#inert":
         return INERT
+    if upcons is not None and token.lower()[:4] == b"#up<" and token[-1] == b">"[0]:
+        try:
+            j = len(token)-1
+            assert j >= 4
+            up = int(token[4:j])
+            if not 1 <= up <= depth:
+                raise ValueError
+        except ValueError:
+            raise ParsingError("invalid up-reference amount", line_no, char_no)
+        for i in range(depth-1, -1, -1):
+            if i in upcons:
+                break
+            upcons[i] = MutablePair(NIL, NIL)
+        return upcons[depth-up]
     if token[0] == b'"'[0]:
         i = 1
         len_token = len(token) - 1
@@ -609,6 +687,7 @@ def parse(tokens, offsets=None, locations=None):
 def _parse_elements(
     tokens,
     offsets=None, locations=None,
+    depth=0, upcons=None,
     line_no=-1, char_no=-1,
     first_line_no=-1, first_char_no=-1,
 ):
@@ -635,7 +714,7 @@ def _parse_elements(
             line_no = offsets[-1] if offsets is not None else -1
             char_no = offsets[-2] if offsets is not None else -1
             raise ParsingError("unexpected close bracket", line_no, char_no)
-        element = parse(tokens, offsets=offsets, locations=locations)
+        element = parse(tokens, offsets=offsets, locations=locations, depth=depth, upcons=upcons)
         if not tokens:
             raise ParsingError("unmatched open bracket", first_line_no, first_char_no)
         end_line_no = offsets.pop() if offsets is not None else -1
@@ -643,7 +722,7 @@ def _parse_elements(
         if tokens.pop() != b")":
             raise ParsingError("expected close bracket", end_line_no, end_char_no)
         return element, end_line_no, end_char_no
-    element = parse(tokens, offsets=offsets, locations=locations)
+    element = parse(tokens, offsets=offsets, locations=locations, depth=depth+1, upcons=upcons)
     if not tokens:
         raise ParsingError("unmatched open bracket", first_line_no, first_char_no)
     next_line_no = offsets[-1] if offsets is not None else -1
@@ -651,10 +730,16 @@ def _parse_elements(
     rest, end_line_no, end_char_no = _parse_elements(
         tokens,
         offsets=offsets, locations=locations,
+        depth=depth+1, upcons=upcons,
         line_no=next_line_no, char_no=next_char_no,
         first_line_no=first_line_no, first_char_no=first_char_no,
     )
-    pair = ImmutablePair(element, rest)
+    if depth not in upcons:
+        pair = MutablePair(element, rest)
+    else:
+        pair = upcons.pop(depth)
+        pair.car = element
+        pair.cdr = rest
     if locations is not None:
         locations.append((pair, line_no, char_no, end_line_no, end_char_no + 1))
     return pair, end_line_no, end_char_no
@@ -702,6 +787,7 @@ class _InteractiveParser:
                     copy_tokens,
                     offsets=copy_offsets,
                     locations=temp_locations,
+                    upcons={},
                 )
                 self.curr_exprs.append(temp_expr)
                 self.curr_locations.extend(temp_locations)
@@ -760,6 +846,8 @@ def _prompt_lines(stdin, stdout, prompt_list):
                     i = j
 
 def _f_write(file, obj):
+    _write(file, obj, 0, {})
+def _write(file, obj, depth, upcons):
     if isinstance(obj, Nil):
         file.write(b"()")
     elif isinstance(obj, Int):
@@ -790,17 +878,33 @@ def _f_write(file, obj):
         else:
             file.write(b"#f")
     elif isinstance(obj, Pair):
+        if obj in upcons:
+            file.write(b"#up<")
+            file.write(b"%d" % (depth - upcons[obj],))
+            file.write(b">")
+            return
+        stack = []
         file.write(b"(")
-        _f_write(file, obj.car)
+        stack.append(obj)
+        upcons[obj] = depth
+        depth += 1
+        _write(file, obj.car, depth, upcons)
         obj_cdr = obj.cdr
         while isinstance(obj_cdr, Pair):
+            if obj_cdr in upcons:
+                break
             obj = obj_cdr
             file.write(b" ")
-            _f_write(file, obj.car)
+            stack.append(obj)
+            upcons[obj] = depth
+            depth += 1
+            _write(file, obj.car, depth, upcons)
             obj_cdr = obj.cdr
         if not isinstance(obj_cdr, Nil):
             file.write(b" . ")
-            _f_write(file, obj_cdr)
+            _write(file, obj_cdr, depth, upcons)
+        while stack:
+            upcons.pop(stack.pop())
         file.write(b")")
     elif isinstance(obj, Environment):
         file.write(b"#environment")
@@ -864,6 +968,29 @@ def _f_format_evaluation_error(file, error, filename_locations):
     file.write(b"! error ")
     _f_write(file, error.value)
     file.write(b"\n")
+
+# Location information is not stored on the object, so we need to create a new
+# locations list with the objects in the immutable copy.
+def _f_copy_immutable_and_locations(exprs, locations):
+    old_locations = {}
+    for expr, l1, c1, l2, c2 in locations:
+        old_locations[expr] = (l1, c1, l2, c2)
+    copies = []
+    new_locations = []
+    for expr in exprs:
+        copy = _f_copy_immutable(expr)
+        copies.append(copy)
+        _transfer_locations(expr, copy, old_locations, new_locations)
+    return copies, new_locations
+def _transfer_locations(orig, copy, old_locations, new_locations):
+    if orig not in old_locations:
+        return
+    l1, c1, l2, c2 = old_locations.pop(orig)
+    new_locations.append((copy, l1, c1, l2, c2))
+    if isinstance(orig, Pair):
+        assert isinstance(copy, Pair)
+        _transfer_locations(orig.car, copy.car, old_locations, new_locations)
+        _transfer_locations(orig.cdr, copy.cdr, old_locations, new_locations)
 
 # == Primitive combiners
 
@@ -965,6 +1092,22 @@ def _operative_cdr(env, expr, parent):
     if not isinstance(pair, Pair): raise RuntimeError(_ERROR)
     return f_return(parent, pair.cdr)
 
+# (set-car! pair car)
+def _operative_set_car(env, expr, parent):
+    _ERROR = "expected (set-car! MUTABLE-PAIR ANY)"
+    pair, car = _unpack2(expr, _ERROR)
+    if not isinstance(pair, MutablePair): raise RuntimeError(_ERROR)
+    pair.car = car
+    return f_return(parent, INERT)
+
+# (set-cdr! pair cdr)
+def _operative_set_cdr(env, expr, parent):
+    _ERROR = "expected (set-cdr! MUTABLE-PAIR ANY)"
+    pair, cdr = _unpack2(expr, _ERROR)
+    if not isinstance(pair, MutablePair): raise RuntimeError(_ERROR)
+    pair.cdr = cdr
+    return f_return(parent, INERT)
+
 # ($vau (dyn args) expr)
 def _operative_vau(env, expr, parent):
     _ERROR = "expected ($vau (PARAM PARAM) ANY)"
@@ -1027,7 +1170,7 @@ def _operative_make_environment(env, expr, parent):
     return f_return(parent, Environment({}, environment))
 
 # ($define! name value)
-def _define_recursively_set(env, name, value, visited_names):
+def _define_recursively_set(env, name, value, visited_names, visited_pairs):
     if isinstance(name, Ignore):
         return
     if isinstance(name, Nil):
@@ -1041,14 +1184,18 @@ def _define_recursively_set(env, name, value, visited_names):
         _environment_update(env, name, value)
         return
     if isinstance(name, Pair):
+        if name in visited_pairs:
+            raise RuntimeError("parameter tree consists of self-referencing pairs")
+        visited_pairs[name] = True
         if not isinstance(value, Pair):
             raise RuntimeError("parameter tree could not be matched to value")
-        _define_recursively_set(env, name.car, value.car, visited_names)
-        _define_recursively_set(env, name.cdr, value.cdr, visited_names)
+        _define_recursively_set(env, name.car, value.car, visited_names, visited_pairs)
+        _define_recursively_set(env, name.cdr, value.cdr, visited_names, visited_pairs)
+        visited_pairs.pop(name)
         return
     raise RuntimeError("parameter tree consists of invalid types")
 @jit.unroll_safe
-def _define_recursively_list(env, name, value, visited_names):
+def _define_recursively_list(env, name, value, visited_names, visited_pairs):
     if isinstance(name, Ignore):
         return
     if isinstance(name, Nil):
@@ -1063,14 +1210,19 @@ def _define_recursively_list(env, name, value, visited_names):
         _environment_update(env, name, value)
         return
     if isinstance(name, Pair):
+        for visited_pair in visited_pairs:
+            if name is visited_pair:
+                raise RuntimeError("parameter tree consists of self-referencing pairs")
+        visited_pairs.append(name)
         if not isinstance(value, Pair):
             raise RuntimeError("parameter tree could not be matched to value")
-        _define_recursively_list(env, name.car, value.car, visited_names)
-        _define_recursively_list(env, name.cdr, value.cdr, visited_names)
+        _define_recursively_list(env, name.car, value.car, visited_names, visited_pairs)
+        _define_recursively_list(env, name.cdr, value.cdr, visited_names, visited_pairs)
+        visited_pairs.pop()
         return
     raise RuntimeError("parameter tree consists of invalid types")
 @jit.unroll_safe
-def _define_recursively_check(name, visited_names):
+def _define_recursively_check(name, visited_names, visited_pairs):
     if isinstance(name, Ignore):
         return
     if isinstance(name, Nil):
@@ -1082,8 +1234,13 @@ def _define_recursively_check(name, visited_names):
         visited_names.append(name.name)
         return
     if isinstance(name, Pair):
-        _define_recursively_check(name.car, visited_names)
-        _define_recursively_check(name.cdr, visited_names)
+        for visited_pair in visited_pairs:
+            if name is visited_pair:
+                return "parameter tree consists of self-referencing pairs"
+        visited_pairs.append(name)
+        _define_recursively_check(name.car, visited_names, visited_pairs)
+        _define_recursively_check(name.cdr, visited_names, visited_pairs)
+        visited_pairs.pop()
         return
     return "parameter tree consists of invalid types"
 def _define_recursively_nocheck(env, name, value):
@@ -1105,12 +1262,12 @@ def _define_recursively_nocheck(env, name, value):
     raise RuntimeError("parameter tree consists of invalid types")
 @jit.elidable
 def _define_check_valid_elidable(name):
-    return _define_recursively_check(name, [])
+    return _define_recursively_check(name, [], [])
 def _define(env, name, value):
     if not jit.we_are_jitted():
-        _define_recursively_set(env, name, value, {})
+        _define_recursively_set(env, name, value, {}, {})
     elif jit.isvirtual(name) or isinstance(name, MutablePair):
-        _define_recursively_list(env, name, value, [])
+        _define_recursively_list(env, name, value, [], [])
     else:
         message = _define_check_valid_elidable(name)
         if message is not None:
@@ -1184,6 +1341,8 @@ _DEFAULT_ENV = {
     b"cons": _primitive(1, _operative_cons),
     b"car": _primitive(1, _operative_car),
     b"cdr": _primitive(1, _operative_cdr),
+    b"set-car!": _primitive(1, _operative_set_car),
+    b"set-cdr!": _primitive(1, _operative_set_cdr),
     b"$vau": _primitive(0, _operative_vau),
     b"wrap": _primitive(1, _operative_wrap),
     b"unwrap": _primitive(1, _operative_unwrap),
@@ -1256,7 +1415,11 @@ def main(argv):
             locations = []
             filename_locations.append((filename, locations))
             while tokens:
-                exprs.append(parse(tokens, offsets=offsets, locations=locations))
+                expr_locations = []
+                expr = parse(tokens, offsets=offsets, locations=expr_locations, upcons={})
+                [expr], copy_locations = _f_copy_immutable_and_locations([expr], expr_locations)
+                exprs.append(expr)
+                locations.extend(copy_locations)
         except ParsingError as e:
             if stderr is None:
                 stdin, stdout, stderr = rfile.create_stdio()
@@ -1307,7 +1470,10 @@ def main(argv):
         for line in _prompt_lines(stdin, stdout, prompt_list):
             # Attempt to lex and parse
             try:
-                done, exprs = parser.handle(line, lines=lines, locations=locations)
+                expr_locations = []
+                done, exprs = parser.handle(line, lines=lines, locations=expr_locations)
+                exprs, copy_locations = _f_copy_immutable_and_locations(exprs, expr_locations)
+                locations.extend(copy_locations)
             except ParsingError as e:
                 _f_format_syntax_error(stderr, e, b"<stdin>", parser.last_lines, starts_at=len(lines))
                 stderr.flush()
