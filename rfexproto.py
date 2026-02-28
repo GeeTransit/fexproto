@@ -34,6 +34,9 @@ except ImportError:
             @staticmethod
             def call_location(): return lambda func: func
     class rfile(object):
+        @staticmethod
+        def create_file(filename):
+            return open(filename, "rb")
         if b"" == "":  # Python 2
             @staticmethod
             def create_stdio():
@@ -840,9 +843,9 @@ def _f_print_trace(file, continuation, sources=None):
         _f_write(file, expr)
         file.write(b"\n")
 
-def _f_format_syntax_error(file, error, lines, starts_at=0):
+def _f_format_syntax_error(file, error, filename, lines, starts_at=0):
     file.write(b"! --- syntax error ---\n")
-    file.write(b"  in <stdin> at %d [%d:]\n" % (error.line_no + 1, error.char_no + 1))
+    file.write(b"  in %s at %d [%d:]\n" % (filename, error.line_no + 1, error.char_no + 1))
     file.write(b"    ")
     file.write(lines[error.line_no - starts_at])
     file.write(b"\n")
@@ -850,12 +853,13 @@ def _f_format_syntax_error(file, error, lines, starts_at=0):
     _f_write(file, String(_c_str_to_bytes(error.message)))
     file.write(b"\n")
 
-def _f_format_evaluation_error(file, error, lines, locations):
+def _f_format_evaluation_error(file, error, filename_locations):
     if error.parent is not None:
         file.write(b"! --- stack trace ---\n")
         sources = {}
-        for expr, l1, c1, l2, c2 in locations:
-            sources[expr] = (b"<stdin>", l1, c1, l2, c2)
+        for filename, locations in filename_locations:
+            for expr, l1, c1, l2, c2 in locations:
+                sources[expr] = (filename, l1, c1, l2, c2)
         _f_print_trace(file, error.parent, sources=sources)
     file.write(b"! error ")
     _f_write(file, error.value)
@@ -1205,26 +1209,107 @@ def main(argv):
     if user_config_string is not None:
         jit.set_user_param(None, user_config_string)
 
-    # Start REPL if no args and is TTY
-    if len(argv) == 1 and os.isatty(0):
+    stdin = stdout = stderr = None
+    file = None
+    filename = None
+    interactive = False
+
+    # TODO: look into optparse
+    if len(argv) >= 2 and argv[1] == "-i":
+        argv.pop(1)
+        interactive = True
+    if len(argv) >= 2 and argv[1] == "--":
+        argv.pop(1)
+    if len(argv) == 2:
+        filename = _c_str_to_bytes(argv[1])
+        file = rfile.create_file(filename)
+    elif len(argv) == 1:
+        stdin, stdout, stderr = rfile.create_stdio()
+        # For some reason, os.isatty(0) won't compile here
+        if stdin.isatty():
+            interactive = True
+        elif not interactive:
+            filename = b"<stdin>"
+            file = stdin
+    else:
+        stdin, stdout, stderr = rfile.create_stdio()
+        stdout.write(b"error: unknown arguments\n")
+        return 2
+
+    env = None
+    filename_locations = []
+    if file is not None:
+        # Read whole file
+        parts = []
+        while True:
+            part = file.read(2048)
+            if not part: break
+            parts.append(part)
+        text = b"".join(parts)
+        # Lex and parse
+        try:
+            offsets = []
+            tokens = tokenize(text, offsets=offsets)
+            tokens.reverse()
+            offsets.reverse()
+            exprs = []
+            locations = []
+            filename_locations.append((filename, locations))
+            while tokens:
+                exprs.append(parse(tokens, offsets=offsets, locations=locations))
+        except ParsingError as e:
+            if stderr is None:
+                stdin, stdout, stderr = rfile.create_stdio()
+            _f_format_syntax_error(stderr, e, filename, text.split(b"\n"))
+            stderr.flush()
+            if not interactive:
+                return 1
+        else:
+            # Setup standard environment
+            env = Environment({}, Environment(_DEFAULT_ENV, None))
+            # Evaluate expressions and write their results
+            for expr in exprs:
+                state = _f_toplevel_eval(env, expr)
+                try:
+                    value = fully_evaluate(state)
+                    if not isinstance(value, Inert):
+                        if stdout is None:
+                            stdin, stdout, stderr = rfile.create_stdio()
+                        _f_write(stdout, value)
+                        stdout.write(b"\n")
+                        stdout.flush()
+                except EvaluationError as e:
+                    if stderr is None:
+                        stdin, stdout, stderr = rfile.create_stdio()
+                    _f_format_evaluation_error(stderr, e, filename_locations)
+                    stderr.flush()
+                    if not interactive:
+                        return 1
+                    break
+
+    # Start REPL if no args and is TTY or if -i flag was passed
+    if interactive:
         # REPL prompts
         PROMPT_1 = b"rf> "  # default prompt
         PROMPT_2 = b"... "  # multi-line prompt
         prompt_list = [PROMPT_1]
         # Setup standard environment
-        env = Environment({}, Environment(_DEFAULT_ENV, None))
+        if env is None:
+            env = Environment({}, Environment(_DEFAULT_ENV, None))
         # Parser state
         lines = []
         locations = []
+        filename_locations.append((b"<stdin>", locations))
         parser = _InteractiveParser()
         # Read STDIN lines one by one
-        stdin, stdout, stderr = rfile.create_stdio()
+        if stdin is None:
+            stdin, stdout, stderr = rfile.create_stdio()
         for line in _prompt_lines(stdin, stdout, prompt_list):
             # Attempt to lex and parse
             try:
                 done, exprs = parser.handle(line, lines=lines, locations=locations)
             except ParsingError as e:
-                _f_format_syntax_error(stderr, e, parser.last_lines, starts_at=len(lines))
+                _f_format_syntax_error(stderr, e, b"<stdin>", parser.last_lines, starts_at=len(lines))
                 stderr.flush()
                 prompt_list[0] = PROMPT_1
                 continue
@@ -1241,48 +1326,10 @@ def main(argv):
                         stdout.write(b"\n")
                         stdout.flush()
             except EvaluationError as e:
-                _f_format_evaluation_error(stderr, e, lines, locations)
+                _f_format_evaluation_error(stderr, e, filename_locations)
                 stderr.flush()
             prompt_list[0] = PROMPT_1
-        return 0
 
-    # Read whole STDIN
-    stdin, stdout, stderr = rfile.create_stdio()
-    parts = []
-    while True:
-        part = stdin.read(2048)
-        if not part: break
-        parts.append(part)
-    text = b"".join(parts)
-    # Lex and parse
-    try:
-        offsets = []
-        tokens = tokenize(text, offsets=offsets)
-        tokens.reverse()
-        offsets.reverse()
-        exprs = []
-        locations = []
-        while tokens:
-            exprs.append(parse(tokens, offsets=offsets, locations=locations))
-    except ParsingError as e:
-        _f_format_syntax_error(stderr, e, text.split(b"\n"))
-        stderr.flush()
-        return 1
-    # Setup standard environment
-    env = Environment({}, Environment(_DEFAULT_ENV, None))
-    # Evaluate expressions and write their results
-    for expr in exprs:
-        state = _f_toplevel_eval(env, expr)
-        try:
-            value = fully_evaluate(state)
-            if not isinstance(value, Inert):
-                _f_write(stdout, value)
-                stdout.write(b"\n")
-                stdout.flush()
-        except EvaluationError as e:
-            _f_format_evaluation_error(stderr, e, text.split(b"\n"), locations)
-            stderr.flush()
-            return 1
     return 0
 
 # RPython toolchain
