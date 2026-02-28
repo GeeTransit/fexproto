@@ -242,13 +242,14 @@ def _get_list_metrics(obj):
 def _encycle(a, c, args):
     if c == 0:
         return args
+    orig = args
     for _ in range(a):
         args = args.cdr
     head = args
     for _ in range(c - 1):
         args = args.cdr
     args.cdr = head
-    return args
+    return orig
 
 def _step_call_combcar(_env, value, parent):
     if type(value) is not Combiner:
