@@ -855,6 +855,9 @@ class _Reader:
             raise EOFError("end of file reached")
         return self._read()
 
+    def reset(self):
+        self._cons.clear()
+
     # Returns the current value from get_next_char
     @property
     def curr(self):
@@ -1015,7 +1018,7 @@ class _Reader:
             if len(chars) >= 2 and chars[1] == b"."[0]:
                 if not all(char == b"."[0] for char in chars[1:]):
                     raise ValueError(f'invalid self-reference {const_info}: {chars}')
-                if len(chars)-1 >= len(self._cons):
+                if len(chars)-1 > len(self._cons):
                     raise ValueError(f'self-reference {const_info} references past the root element')
                 return self._cons[-(len(chars)-1)]
             raise ValueError(f'unknown {const_info}: {chars}')
@@ -1152,6 +1155,7 @@ def main(env=None, argv=None):
                     raise
                 _syntax_error = Pair(type(e).__name__.encode("utf-8"), Pair(", ".join(e.args).encode("utf-8"), ()))
                 print(end="! ");_f_write(Pair("syntax-error", _syntax_error));print()
+                reader.reset()
                 while reader.curr not in b"\n":
                     reader.next
                 if reader.curr == b"":
