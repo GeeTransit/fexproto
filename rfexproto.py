@@ -1018,6 +1018,12 @@ def _unpack3(expr, message, rest=False):
     if not isinstance(expr, Nil): raise RuntimeError(message)
     return arg1, arg2, arg3
 
+# (number? expr)
+def _operative_number(env, expr, parent):
+    _ERROR = "expected (number? ANY)"
+    number = _unpack1(expr, _ERROR)
+    return f_return(parent, TRUE if isinstance(number, Int) else FALSE)
+
 # (+ a b)
 def _operative_plus(env, expr, parent):
     _ERROR = "expected (+ INT INT)"
@@ -1130,6 +1136,12 @@ def _operative_set_cdr(env, expr, parent):
     pair.cdr = cdr
     return f_return(parent, INERT)
 
+# (operative? expr)
+def _operative_operative(env, expr, parent):
+    _ERROR = "expected (operative? ANY)"
+    combiner = _unpack1(expr, _ERROR)
+    return f_return(parent, TRUE if isinstance(combiner, Combiner) and combiner.num_wraps <= 0 else FALSE)
+
 # ($vau (dyn args) expr)
 def _operative_vau(env, expr, parent):
     _ERROR = "expected ($vau (PARAM PARAM) ANY)"
@@ -1139,6 +1151,12 @@ def _operative_vau(env, expr, parent):
     immutable_name = _f_copy_immutable(name)
     immutable_body = _f_copy_immutable(body)
     return f_return(parent, Combiner(0, UserDefinedOperative(env, envname, immutable_name, immutable_body)))
+
+# (applicative? expr)
+def _operative_applicative(env, expr, parent):
+    _ERROR = "expected (applicative? ANY)"
+    combiner = _unpack1(expr, _ERROR)
+    return f_return(parent, TRUE if isinstance(combiner, Combiner) and combiner.num_wraps > 0 else FALSE)
 
 # (wrap combiner)
 def _operative_wrap(env, expr, parent):
@@ -1154,6 +1172,12 @@ def _operative_unwrap(env, expr, parent):
     if not isinstance(combiner, Combiner): raise RuntimeError(_ERROR)
     if combiner.num_wraps == 0: raise RuntimeError(_ERROR)
     return f_return(parent, Combiner(combiner.num_wraps - 1, combiner.operative))
+
+# (environment? expr)
+def _operative_environment(env, expr, parent):
+    _ERROR = "expected (environment? ANY)"
+    operative = _unpack1(expr, _ERROR)
+    return f_return(parent, TRUE if isinstance(operative, Environment) else FALSE)
 
 # (eval env expr)
 def _operative_eval(env, expr, parent):
@@ -1190,6 +1214,12 @@ def _operative_make_environment(env, expr, parent):
         environment = _unpack1(expr, _ERROR)
         if not isinstance(environment, Environment): raise RuntimeError(_ERROR)
     return f_return(parent, Environment({}, environment))
+
+# (symbol? expr)
+def _operative_symbol(env, expr, parent):
+    _ERROR = "expected (symbol? ANY)"
+    symbol = _unpack1(expr, _ERROR)
+    return f_return(parent, TRUE if isinstance(symbol, Symbol) else FALSE)
 
 # ($define! name value)
 def _define_recursively_set(env, name, value, visited_names, visited_pairs):
@@ -1352,9 +1382,16 @@ def _operative_binds(env, expr, parent):
     next_continuation._call_info = env_expr
     return f_eval(env, env_expr, next_continuation)
 
+# (string? expr)
+def _operative_string(env, expr, parent):
+    _ERROR = "expected (string? ANY)"
+    string = _unpack1(expr, _ERROR)
+    return f_return(parent, TRUE if isinstance(string, String) else FALSE)
+
 def _primitive(num_wraps, func):
     return Combiner(num_wraps, PrimitiveOperative(func))
 _DEFAULT_ENV = {
+    b"number?": _primitive(1, _operative_number),
     b"+": _primitive(1, _operative_plus),
     b"*": _primitive(1, _operative_times),
     b"<=?": _primitive(1, _operative_less_equal),
@@ -1366,15 +1403,20 @@ _DEFAULT_ENV = {
     b"equal?": _primitive(1, _operative_equal),
     b"set-car!": _primitive(1, _operative_set_car),
     b"set-cdr!": _primitive(1, _operative_set_cdr),
+    b"operative?": _primitive(1, _operative_operative),
     b"$vau": _primitive(0, _operative_vau),
+    b"applicative?": _primitive(1, _operative_applicative),
     b"wrap": _primitive(1, _operative_wrap),
     b"unwrap": _primitive(1, _operative_unwrap),
+    b"environment?": _primitive(1, _operative_environment),
     b"eval": _primitive(1, _operative_eval),
     b"$remote-eval": _primitive(0, _operative_remote_eval),
     b"make-environment": _primitive(1, _operative_make_environment),
+    b"symbol?": _primitive(1, _operative_symbol),
     b"$define!": _primitive(0, _operative_define),
     b"$if": _primitive(0, _operative_if),
     b"$binds?": _primitive(0, _operative_binds),
+    b"string?": _primitive(1, _operative_string),
     b"$jit-loop-head": Combiner(0, _F_LOOP_HEAD),
 }
 

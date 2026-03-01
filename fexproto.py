@@ -567,6 +567,12 @@ def _operative_eval(env, expr, parent):
     continuation = Continuation(expr.car, _step_eval, parent)
     return continuation, expr.cdr.car
 
+def _operative_operative(env, expr, parent):
+    return parent, type(expr.car) is Combiner and expr.car.num_wraps <= 0
+
+def _operative_applicative(env, expr, parent):
+    return parent, type(expr.car) is Combiner and expr.car.num_wraps > 0
+
 def _operative_wrap(env, expr, parent):
     return parent, Combiner(expr.car.num_wraps + 1, expr.car.func)
 
@@ -779,6 +785,8 @@ _DEFAULT_ENV = {
     "<=?": Combiner(1, _operative_lessequal),
     "$vau": Combiner(0, _operative_vau),
     "eval": Combiner(1, _operative_eval),
+    "operative?": Combiner(1, _operative_operative),
+    "applicative?": Combiner(1, _operative_applicative),
     "wrap": Combiner(1, _operative_wrap),
     "unwrap": Combiner(1, _operative_unwrap),
     "$define!": Combiner(0, _operative_define),
