@@ -120,7 +120,7 @@ def _f_write(obj):
         elif type(obj) is Pair:
             if id(obj) in seen:
                 seen_depth = seen[id(obj)]
-                print(end="#"+"."*(depth - seen_depth))
+                print(end="#up<"+repr(depth - seen_depth)+">")
             else:
                 start_depth = depth
                 remove = []
@@ -839,6 +839,8 @@ def parse(tokens, filename="\x00parse"):
     return exprs
 
 class _Reader:
+    _warned_deprecated_dot_reference_syntax = False
+
     # get_next_char is a callable that returns a length 0 or 1 bytes object
     def __init__(self, get_next_char, filename):
         self.get_next_char = get_next_char
@@ -1020,7 +1022,21 @@ class _Reader:
                     raise ValueError(f'invalid self-reference {const_info}: {chars}')
                 if len(chars)-1 > len(self._cons):
                     raise ValueError(f'self-reference {const_info} references past the root element')
+                if not type(self)._warned_deprecated_dot_reference_syntax:
+                    import sys
+                    print(f'? (warning "deprecated self-reference syntax {chars}, use #up<{len(chars)-1}> instead")', file=sys.stderr)
+                    type(self)._warned_deprecated_dot_reference_syntax = True
                 return self._cons[-(len(chars)-1)]
+            if chars[:4] == b"#up<" and chars[-1:] == b">":
+                try:
+                    up = int(chars[4:-1])
+                    if up < 1:
+                        raise ValueError
+                except ValueError:
+                    raise ValueError(f'invalid self-reference {const_info}: {chars}')
+                if up > len(self._cons):
+                    raise ValueError(f'self-reference {const_info} references past the root element')
+                return self._cons[-up]
             raise ValueError(f'unknown {const_info}: {chars}')
         if chars[0] in b"0123456789" or chars[0] in b"-+" and len(chars) >= 2 and chars[1] in b"0123456789":
             chars = chars.decode("latin1")
