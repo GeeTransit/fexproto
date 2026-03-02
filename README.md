@@ -4,4 +4,4 @@ Not yet finished implementation of John Shutt's [Kernel language](https://web.cs
 
 Another implementation using the [RPython toolchain](https://rpython.readthedocs.io/en/latest/) is also being worked on and is source compatible with both Python 2.7 and 3.7+.
 
-Note that `$vau` and `eval` have slightly different parameters.
+Note that `$vau` and `eval` have slightly different parameters and environments have only one parent.

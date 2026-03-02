@@ -618,6 +618,7 @@ _STRING_PATTERN = re.compile(b"|".join([
 ]))
 def parse(tokens, offsets=None, locations=None, depth=0, upcons=None):
     token = tokens.pop()
+    assert isinstance(token, bytes)
     line_no = offsets.pop() if offsets is not None else -1
     char_no = offsets.pop() if offsets is not None else -1
     if token == b")":
@@ -1424,7 +1425,7 @@ _DEFAULT_ENV = {
 
 def main(argv):
     import os
-    # Configure JIT to allow larger traces
+    # Configure JIT to allow larger traces (copied from pycket's entry_point.py)
     jit.set_param(None, "trace_limit", 1000000)
     jit.set_param(None, "threshold", 131)
     jit.set_param(None, "trace_eagerness", 50)
