@@ -1,39 +1,52 @@
 ($define! $car (unwrap car))
 ($define! $cdr (unwrap cdr))
 ($define! $cons (unwrap cons))
-($define! list (wrap ($vau (_ args) args)))
+($define! list (wrap ($vau (#ignore args) args)))
 ($define! error
-	((wrap ($vau (_ $basic-vau)
+	((wrap ($vau (#ignore ($basic-vau))
 			(wrap ($vau (dyn error-args)
 				(call/cc
-					((car $basic-vau) (_ cc)
+					($basic-vau (#ignore (cc))
 						(eval dyn
 							(cons
 								(unwrap (continuation->applicative error-continuation))
 							(cons
-								(car cc)
+								cc
 								error-args)))))))))
 		$vau))
+
+; This is based on John Shutt's derivation of $sequence in [1] from primitive
+; features. Modifications include the different parameters for $vau and eval,
+; the lack of null? (which can be derived from eq?), the evaluation of
+; expressions as arguments for better debug stack traces, and a bug fix for
+; late binding of $vau in $seq2.
+;
+; [1] J. N. Shutt, "Revised^-1 Report on the Kernel Programming Language",
+;     Worcester Polytechnic Institute, Worcester, MA, Tech. Report.
+;     WPI-CS-TR-05-07, Mar. 2005 [Amended 29 Oct. 2009]. [Online]. Available:
+;     https://ftp.cs.wpi.edu/pub/techreports/pdf/05-07.pdf. [Accessed: 8 Mar.
+;     2025]
 ($define! $sequence
-	((wrap ($vau (_ $seq2)
-			((car $seq2)
-				($define! $aux-sequence ($vau (env exprs)
-					($if (eq? (cdr exprs) ())
-						(eval env (car exprs))
-						(eval env (list (car $seq2)
-							(car exprs)
-							(cons $aux-sequence (cdr exprs)))))))
+	((wrap ($vau (#ignore ($seq2))
+			($seq2
+				($define! $aux-sequence ($vau (env (head . tail))
+					($if (eq? tail ())
+						(eval env head)
+						(eval env (list $seq2
+							head
+							(cons $aux-sequence tail))))))
 				($vau (env exprs)
 					($if (eq? exprs ())
 						#inert
 						(eval env (cons $aux-sequence exprs)))))))
-		((wrap ($vau (_ $basic-vau)
-				((car $basic-vau) (env a-b)
+		((wrap ($vau (#ignore ($basic-vau))
+				($vau (env (first second))
 					(eval env (list
-						(wrap ((car $basic-vau) (_1 _2)
-							(eval env (car (cdr a-b)))))
-						(car a-b))))))
+						(wrap ($basic-vau (#ignore #ignore)
+							(eval env second)))
+						first)))))
 			$vau)))
+
 ($define! $vau
   ((wrap ($vau (#ignore ($basic-vau))
       ($vau (static (name . body))
