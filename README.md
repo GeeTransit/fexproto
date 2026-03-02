@@ -12,8 +12,10 @@ Note that `$vau` and `eval` have slightly different parameters and environments 
 
 ## Quickstart
 
-Ensure [Python 3.7+](https://www.python.org/) is installed.
+Ensure [Git](https://git-scm.com/) and [Python 3.7+](https://www.python.org/) are installed.
 ```sh
+git clone https://github.com/GeeTransit/fexproto
+cd fexproto
 python3 fexproto.py
 ```
 
