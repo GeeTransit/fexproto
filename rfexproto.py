@@ -1565,7 +1565,7 @@ def main(argv):
 
 # RPython toolchain
 def target(driver, args):
-    driver.exe_name = __name__
+    driver.exe_name = __name__ + "-c"
     if driver.config.translation.jit:
         driver.exe_name += "-jit"
     return main, None
