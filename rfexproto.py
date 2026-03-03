@@ -154,6 +154,13 @@ class PrimitiveOperative(Operative):
             return self.func(env, value, parent)
         except RuntimeError as e:
             return f_error(parent, MutablePair(String(_c_str_to_bytes(e.message)), NIL))
+class ContinuationOperative(Operative):
+    _immutable_ = True
+    def __init__(self, continuation):
+        self.continuation = continuation
+    def call(self, env, value, parent):
+        # TODO: replace with abnormal pass when guarded continuations implemented
+        return f_return(self.continuation, value)
 class UserDefinedOperative(Operative):
     _immutable_ = True
     def __init__(self, env, envname, name, body):
@@ -1400,6 +1407,28 @@ def _operative_binds(env, expr, parent):
     next_continuation._call_info = env_expr
     return f_eval(env, env_expr, next_continuation)
 
+# (continuation? expr)
+def _operative_continuation(env, expr, parent):
+    _ERROR = "expected (continuation? ANY)"
+    continuation = _unpack1(expr, _ERROR)
+    return f_return(parent, TRUE if isinstance(continuation, Continuation) else FALSE)
+
+# (call/cc combiner)
+def _operative_call_cc(env, expr, parent):
+    _ERROR = "expected (call/cc COMBINER)"
+    combiner = _unpack1(expr, _ERROR)
+    if not isinstance(combiner, Combiner): raise RuntimeError(_ERROR)
+    # return f_eval(env, MutablePair(combiner, MutablePair(parent, NIL)), parent)
+    next_continuation = Continuation(env, combiner.operative, parent)
+    return f_return(next_continuation, MutablePair(parent, NIL))
+
+# (continuation->applicative continuation)
+def _operative_continuation_to_applicative(env, expr, parent):
+    _ERROR = "expected (continuation->applicative CONTINUATION)"
+    continuation = _unpack1(expr, _ERROR)
+    if not isinstance(continuation, Continuation): raise RuntimeError(_ERROR)
+    return f_return(parent, Combiner(1, ContinuationOperative(continuation)))
+
 # (string? expr)
 def _operative_string(env, expr, parent):
     _ERROR = "expected (string? ANY)"
@@ -1434,6 +1463,10 @@ _DEFAULT_ENV = {
     b"$define!": _primitive(0, _operative_define),
     b"$if": _primitive(0, _operative_if),
     b"$binds?": _primitive(0, _operative_binds),
+    b"continuation?": _primitive(1, _operative_continuation),
+    b"call/cc": _primitive(1, _operative_call_cc),
+    b"continuation->applicative": _primitive(1, _operative_continuation_to_applicative),
+    b"error-continuation": ERROR_CONT,
     b"string?": _primitive(1, _operative_string),
     b"$jit-loop-head": Combiner(0, _F_LOOP_HEAD),
 }
