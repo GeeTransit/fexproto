@@ -1429,6 +1429,15 @@ def _operative_continuation_to_applicative(env, expr, parent):
     if not isinstance(continuation, Continuation): raise RuntimeError(_ERROR)
     return f_return(parent, Combiner(1, ContinuationOperative(continuation)))
 
+# (extend-continuation continuation applicative environment)
+def _operative_extend_continuation(env, expr, parent):
+    _ERROR = "expected (extend-continuation CONTINUATION STRICT-APPLICATIVE ENVIRONMENT)"
+    continuation, applicative, environment = _unpack3(expr, _ERROR)
+    if not isinstance(continuation, Continuation): raise RuntimeError(_ERROR)
+    if not isinstance(applicative, Combiner) or applicative.num_wraps != 1: raise RuntimeError(_ERROR)
+    if not isinstance(environment, Environment): raise RuntimeError(_ERROR)
+    return f_return(parent, Continuation(environment, applicative.operative, continuation))
+
 # (string? expr)
 def _operative_string(env, expr, parent):
     _ERROR = "expected (string? ANY)"
@@ -1466,6 +1475,7 @@ _DEFAULT_ENV = {
     b"continuation?": _primitive(1, _operative_continuation),
     b"call/cc": _primitive(1, _operative_call_cc),
     b"continuation->applicative": _primitive(1, _operative_continuation_to_applicative),
+    b"extend-continuation": _primitive(1, _operative_extend_continuation),
     b"error-continuation": ERROR_CONT,
     b"string?": _primitive(1, _operative_string),
     b"$jit-loop-head": Combiner(0, _F_LOOP_HEAD),
