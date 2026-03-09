@@ -18,11 +18,19 @@
 # Optional RPython imports
 try:
     from rpython.rlib.rsre import rsre_re as re
+    from rpython.rlib import rweakref
     from rpython.rlib import jit
     from rpython.rlib import objectmodel
     from rpython.rlib import rfile
 except ImportError:
     import re
+    class rweakref(object):
+        class RWeakKeyDictionary(object):
+            def __init__(self, *args):
+                import weakref
+                self._data = weakref.WeakKeyDictionary()
+            def get(self, key): return self._data.get(key, None)
+            def set(self, key, value): self._data[key] = value
     class jit(object):
         class JitDriver(object):
             def __init__(self, **kwargs): pass
@@ -187,6 +195,21 @@ class UserDefinedOperative(Operative):
 def _f_noop(env, expr, parent):
     return f_return(parent, expr)
 NOOP = PrimitiveOperative(_f_noop)
+
+# Interpreter-wide mapping from pair to location info
+class Location(object):
+    def __init__(self, filename, start_line_no, start_char_no, end_line_no, end_char_no):
+        assert isinstance(filename, bytes)
+        self.filename = filename
+        assert isinstance(start_line_no, int)
+        self.start_line_no = start_line_no
+        assert isinstance(start_char_no, int)
+        self.start_char_no = start_char_no
+        assert isinstance(end_line_no, int)
+        self.end_line_no = end_line_no
+        assert isinstance(end_char_no, int)
+        self.end_char_no = end_char_no
+LOCATIONS = rweakref.RWeakKeyDictionary(Object, Location)
 
 def _copy_immutable_recursively_set(expr, visited):
     if not isinstance(expr, MutablePair):
@@ -940,7 +963,7 @@ def _write(file, obj, depth, upcons):
     else:
         file.write(b"#unknown")
 
-def _f_print_trace(file, continuation, sources=None):
+def _f_print_trace(file, continuation):
     assert isinstance(continuation, Continuation)
     # Output stack trace in reverse order, with recent calls last
     frames = []
@@ -953,7 +976,8 @@ def _f_print_trace(file, continuation, sources=None):
         if continuation._call_info is None:
             continue
         expr = continuation._call_info
-        if expr not in sources:
+        loc = LOCATIONS.get(expr)
+        if loc is None:
             # Non-source expressions can be evaluated, usually from eval
             file.write(b"  in unknown\n")
             file.write(b"    ")
@@ -961,12 +985,11 @@ def _f_print_trace(file, continuation, sources=None):
             file.write(b"\n")
             continue
         # Get source location of expression
-        filename, start_line_no, start_char_no, end_line_no, end_char_no = sources[expr]
-        if start_line_no == end_line_no:
-            line_info = b"%d" % (start_line_no+1,)
+        if loc.start_line_no == loc.end_line_no:
+            line_info = b"%d" % (loc.start_line_no+1,)
         else:
-            line_info = b"%d:%d" % (start_line_no+1, end_line_no+1)
-        file.write(b"  in %s at %s [%d:%d]\n" % (filename, line_info, start_char_no+1, end_char_no+1))
+            line_info = b"%d:%d" % (loc.start_line_no+1, loc.end_line_no+1)
+        file.write(b"  in %s at %s [%d:%d]\n" % (loc.filename, line_info, loc.start_char_no+1, loc.end_char_no+1))
         # TODO: output the actual content of the lines the expression is from
         file.write(b"    ")
         _f_write(file, expr)
@@ -982,14 +1005,10 @@ def _f_format_syntax_error(file, error, filename, lines, starts_at=0):
     _f_write(file, String(_c_str_to_bytes(error.message)))
     file.write(b"\n")
 
-def _f_format_evaluation_error(file, error, filename_locations):
+def _f_format_evaluation_error(file, error):
     if error.parent is not None:
         file.write(b"! --- stack trace ---\n")
-        sources = {}
-        for filename, locations in filename_locations:
-            for expr, l1, c1, l2, c2 in locations:
-                sources[expr] = (filename, l1, c1, l2, c2)
-        _f_print_trace(file, error.parent, sources=sources)
+        _f_print_trace(file, error.parent)
     file.write(b"! error ")
     _f_write(file, error.value)
     file.write(b"\n")
@@ -1522,7 +1541,6 @@ def main(argv):
         return 2
 
     env = None
-    filename_locations = []
     if file is not None:
         # Read whole file
         parts = []
@@ -1538,14 +1556,13 @@ def main(argv):
             tokens.reverse()
             offsets.reverse()
             exprs = []
-            locations = []
-            filename_locations.append((filename, locations))
             while tokens:
                 expr_locations = []
                 expr = parse(tokens, offsets=offsets, locations=expr_locations, upcons={})
                 [expr], copy_locations = _f_copy_immutable_and_locations([expr], expr_locations)
                 exprs.append(expr)
-                locations.extend(copy_locations)
+                for expr, l1, c1, l2, c2 in copy_locations:
+                    LOCATIONS.set(expr, Location(filename, l1, c1, l2, c2))
         except ParsingError as e:
             if stderr is None:
                 stdin, stdout, stderr = rfile.create_stdio()
@@ -1570,7 +1587,7 @@ def main(argv):
                 except EvaluationError as e:
                     if stderr is None:
                         stdin, stdout, stderr = rfile.create_stdio()
-                    _f_format_evaluation_error(stderr, e, filename_locations)
+                    _f_format_evaluation_error(stderr, e)
                     stderr.flush()
                     if not interactive:
                         return 1
@@ -1587,8 +1604,6 @@ def main(argv):
             env = Environment({}, Environment(_DEFAULT_ENV, None))
         # Parser state
         lines = []
-        locations = []
-        filename_locations.append((b"<stdin>", locations))
         parser = _InteractiveParser()
         # Read STDIN lines one by one
         if stdin is None:
@@ -1599,7 +1614,8 @@ def main(argv):
                 expr_locations = []
                 done, exprs = parser.handle(line, lines=lines, locations=expr_locations)
                 exprs, copy_locations = _f_copy_immutable_and_locations(exprs, expr_locations)
-                locations.extend(copy_locations)
+                for expr, l1, c1, l2, c2 in copy_locations:
+                    LOCATIONS.set(expr, Location(b"<stdin>", l1, c1, l2, c2))
             except ParsingError as e:
                 _f_format_syntax_error(stderr, e, b"<stdin>", parser.last_lines, starts_at=len(lines))
                 stderr.flush()
@@ -1618,7 +1634,7 @@ def main(argv):
                         stdout.write(b"\n")
                         stdout.flush()
             except EvaluationError as e:
-                _f_format_evaluation_error(stderr, e, filename_locations)
+                _f_format_evaluation_error(stderr, e)
                 stderr.flush()
             prompt_list[0] = PROMPT_1
 
