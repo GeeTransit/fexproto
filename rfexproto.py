@@ -1539,7 +1539,15 @@ def main(argv):
         argv.pop(1)
     if len(argv) == 2:
         filename = _c_str_to_bytes(argv[1])
-        file = rfile.create_file(filename)
+        try:
+            file = rfile.create_file(filename)
+        except (OSError, IOError):
+            stdin, stdout, stderr = rfile.create_stdio()
+            stderr.write(b"error: could not read file\n")
+            stderr.flush()
+            if not interactive:
+                return 1
+            filename = None
     elif len(argv) == 1:
         stdin, stdout, stderr = rfile.create_stdio()
         # For some reason, os.isatty(0) won't compile here
@@ -1557,10 +1565,19 @@ def main(argv):
     if file is not None:
         # Read whole file
         parts = []
-        while True:
-            part = file.read(2048)
-            if not part: break
-            parts.append(part)
+        try:
+            while True:
+                part = file.read(2048)
+                if not part: break
+                parts.append(part)
+        except (OSError, IOError):
+            if stderr is None:
+                stdin, stdout, stderr = rfile.create_stdio()
+            stderr.write(b"error: could not read file\n")
+            stderr.flush()
+            if not interactive:
+                return 1
+            del parts[:]
         text = b"".join(parts)
         # Lex and parse
         try:
