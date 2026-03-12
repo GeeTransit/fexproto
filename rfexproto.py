@@ -262,14 +262,21 @@ class EvaluationDone(Exception):
     def __init__(self, value):
         # Resolved value which stops the evaluation loop
         self.value = value
+class EvaluationStop(Exception):
+    def __init__(self, value):
+        # Exception which stops evalulation of the current file or REPL
+        self.value = value
 
+def _f_evaluation_stop(env, expr, parent):
+    raise EvaluationStop(expr)
+ROOT_CONT = Continuation(None, PrimitiveOperative(_f_evaluation_stop), None)
 def _f_error_cont(env, expr, parent):
     if isinstance(expr, Pair):
         original_parent = expr.car
         if isinstance(original_parent, Continuation):
             raise EvaluationError(expr.cdr, original_parent)
     raise EvaluationError(expr)
-ERROR_CONT = Continuation(None, PrimitiveOperative(_f_error_cont), None)
+ERROR_CONT = Continuation(None, PrimitiveOperative(_f_error_cont), ROOT_CONT)
 def _f_evaluation_done(env, expr, parent):
     raise EvaluationDone(expr)
 EVALUATION_DONE = PrimitiveOperative(_f_evaluation_done)
@@ -430,7 +437,7 @@ class FBindsEnvironment(Environment):
 # Core interpreter logic
 
 def _f_toplevel_eval(env, expr):
-    parent = Continuation(None, EVALUATION_DONE, None)
+    parent = Continuation(None, EVALUATION_DONE, ROOT_CONT)
     parent._call_info = expr
     return f_eval(env, expr, parent)
 
@@ -1013,6 +1020,11 @@ def _f_format_evaluation_error(file, error):
     _f_write(file, error.value)
     file.write(b"\n")
 
+def _f_format_evaluation_stop(file, error):
+    file.write(b"! exit ")
+    _f_write(file, error.value)
+    file.write(b"\n")
+
 # Location information is not stored on the object, so we need to create a new
 # locations list with the objects in the immutable copy.
 def _f_copy_immutable_and_locations(exprs, locations):
@@ -1496,6 +1508,7 @@ _DEFAULT_ENV = {
     b"continuation->applicative": _primitive(1, _operative_continuation_to_applicative),
     b"extend-continuation": _primitive(1, _operative_extend_continuation),
     b"error-continuation": ERROR_CONT,
+    b"root-continuation": ROOT_CONT,
     b"string?": _primitive(1, _operative_string),
     b"$jit-loop-head": Combiner(0, _F_LOOP_HEAD),
 }
@@ -1584,6 +1597,13 @@ def main(argv):
                         _f_write(stdout, value)
                         stdout.write(b"\n")
                         stdout.flush()
+                except EvaluationStop as e:
+                    if interactive:
+                        if stderr is None:
+                            stdin, stdout, stderr = rfile.create_stdio()
+                        _f_format_evaluation_stop(stderr, e)
+                        stderr.flush()
+                    break
                 except EvaluationError as e:
                     if stderr is None:
                         stdin, stdout, stderr = rfile.create_stdio()
@@ -1633,6 +1653,8 @@ def main(argv):
                         _f_write(stdout, value)
                         stdout.write(b"\n")
                         stdout.flush()
+            except EvaluationStop:
+                break
             except EvaluationError as e:
                 _f_format_evaluation_error(stderr, e)
                 stderr.flush()
