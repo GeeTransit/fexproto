@@ -44,6 +44,12 @@ Combiner = namedtuple("Combiner", "num_wraps operative")
 Combine = namedtuple("Combine", "operands dyn parent")
 IfHelper = namedtuple("IfHelper", "then else_ dyn parent")
 UserOp = namedtuple("UserOp", "static envname name body")
+def L(first, *args):
+    args = [first] + list(args)
+    result = args.pop()
+    while args:
+        result = Pair(args.pop(), result)
+    return result
 def lookup(env, symbol):
     if env is None:
         return None
@@ -116,3 +122,20 @@ assert fully_evaluate((
     Pair(Pair("$vau", Pair(Pair("dyn", Pair("args", ())), Pair("args", ()))), 1),
     Eval(Env({"$vau": Combiner(0, "$vau")}, None), None),
 )) == 1
+cond = fully_evaluate((
+    L("$vau", L("dyn", "args", ()),
+        L("$if", L("eval", "dyn", L("car", L("car", "args", ()), ()), ()),
+            L("eval", "dyn", L("car", L("cdr", L("car", "args", ()), ()), ()), ()),
+            L("eval", "dyn", L("cons", "$cond", L("cdr", "args", ()), ()), ()),
+        ()),
+    ()),
+    Eval(Env({
+        "$vau": Combiner(0, "$vau"),
+        "$if": Combiner(0, "$if"),
+        "eval": Combiner(1, "eval"),
+        "car": Combiner(1, "car"),
+        "cdr": Combiner(1, "cdr"),
+        "cons": Combiner(1, "cons"),
+    }, None), None),
+))
+cond.operative.static.items["$cond"] = cond
