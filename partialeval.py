@@ -36,12 +36,14 @@ when we evaluate an expression, track the steps made and follow the steps, guard
 # symbols are str
 #
 from collections import namedtuple
+EllipsisType = type(...)
 Pair = namedtuple("Pair", "car cdr")
 Eval = namedtuple("Eval", "env parent")
 Env = namedtuple("Env", "items parent")
 Combiner = namedtuple("Combiner", "num_wraps operative")
 Combine = namedtuple("Combine", "operands dyn parent")
 IfHelper = namedtuple("IfHelper", "then else_ dyn parent")
+UserOp = namedtuple("UserOp", "static envname name body")
 def lookup(env, symbol):
     if env is None:
         return None
@@ -73,6 +75,24 @@ def plug(value, cont):
         case (False, IfHelper(then, else_, dyn, parent)):
             next_ = Eval(dyn, parent)
             return else_, next_
+        # Handle user defined operatives from $vau
+        case (Combiner(0, "$vau"), Combine(Pair(Pair((str() | EllipsisType()) as envname, Pair(str() as name, ())), Pair(body, ())), dyn, parent)):
+            operative = UserOp(dyn, envname, name, body)
+            combiner = Combiner(0, operative)
+            return combiner, parent
+        case (Combiner(0, UserOp(static, EllipsisType(), name, body)), Combine(operands, dyn, parent)):
+            env = Env({
+                name: operands,
+            }, static)
+            next_ = Eval(env, parent)
+            return body, next_
+        case (Combiner(0, UserOp(static, envname, name, body)), Combine(operands, dyn, parent)):
+            env = Env({
+                envname: dyn,
+                name: operands,
+            }, static)
+            next_ = Eval(env, parent)
+            return body, next_
     raise NotImplementedError
 
 assert plug(1, Eval(None, None)) == (1, None)
@@ -92,3 +112,7 @@ assert fully_evaluate((
     Pair("$if", Pair("var", Pair(1, Pair(2, ())))),
     Eval(Env({"$if": Combiner(0, "$if"), "var": False}, None), None),
 )) == 2
+assert fully_evaluate((
+    Pair(Pair("$vau", Pair(Pair("dyn", Pair("args", ())), Pair("args", ()))), 1),
+    Eval(Env({"$vau": Combiner(0, "$vau")}, None), None),
+)) == 1
