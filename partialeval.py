@@ -50,18 +50,16 @@ def L(first, *args):
     while args:
         result = Pair(args.pop(), result)
     return result
-def lookup(env, symbol):
-    if env is None:
-        return None
-    elif symbol in env.items:
-        return env.items[symbol]
-    else:
-        return lookup(env.parent, symbol)
 def plug(value, cont):
     match (value, cont):
         # Lookup symbols in current environment
-        case (str(), Eval(env, parent)):
-            return lookup(env, value), parent
+        case (str() as name, Eval(Env(items, env_parent), parent)) if name in items:
+            return items[name], parent
+        case (str() as name, Eval(Env(items, env_parent), parent)):
+            next_ = Eval(env_parent, parent)
+            return name, next_
+        case (str() as name, Eval(None, parent)):
+            raise LookupError(name)
         # Evaluate the car and combine the result with the cdr
         case (Pair(operator, operands), Eval(env, parent)):
             next_ = Combine(operands, env, parent)
@@ -103,7 +101,7 @@ def plug(value, cont):
 
 assert plug(1, Eval(None, None)) == (1, None)
 assert plug("var", Eval(Env({"var": 1}, None), None)) == (1, None)
-assert plug("up", Eval(Env({"var": 1}, Env({"up": 2}, None)), None)) == (2, None)
+assert plug(*plug("up", Eval(Env({"var": 1}, Env({"up": 2}, None)), None))) == (2, None)
 
 def fully_evaluate(state):
     while True:
