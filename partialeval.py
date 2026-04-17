@@ -36,7 +36,6 @@ when we evaluate an expression, track the steps made and follow the steps, guard
 # symbols are str
 #
 from collections import namedtuple
-EllipsisType = type(...)
 class ContextMeta(type):
     def __instancecheck__(self, instance):
         if type(instance) is Unknown:
@@ -59,6 +58,10 @@ UserOp = wrapnamedtuple("UserOp", "static envname name body")
 EvLis = wrapnamedtuple("EvLis", "combiner rev_args dyn parent")
 EvArg = wrapnamedtuple("EvArg", "combiner rev_args rest_operands dyn parent")
 EvRev = wrapnamedtuple("EvRev", "combiner args dyn parent")
+Sym = wrapnamedtuple("Sym", "name")
+Bool = wrapnamedtuple("Bool", "value")
+Nil = wrapnamedtuple("Nil", "")
+Ignore = wrapnamedtuple("Ignore", "")
 class Unknown:
     def __init__(self, name=None, ctx=None):
         if name is None:
@@ -76,101 +79,129 @@ class Unknown:
 class Context:
     def __init__(self, metadata):
         self.metadata = metadata
-def L(first, *args):
-    args = [first] + list(args)
+def L(first, *rest):
+    args = []
+    for arg in [first] + list(rest):
+        if arg == ():
+            arg = Nil()
+        elif isinstance(arg, str):
+            arg = Sym(arg)
+        elif isinstance(arg, bool):
+            arg = Bool(arg)
+        args.append(arg)
     result = args.pop()
     while args:
         result = Pair(args.pop(), result)
     return result
-def plug(value, cont):
-    match (value, cont):
+def plug(instr, value, cont):
+    match (instr, value, cont):
         # Lookup symbols in current environment
-        case (str() as name, Eval(Env(items, env_parent), parent)) if name in items:
-            return items[name], parent
-        case (str() as name, Eval(Env(items, env_parent), parent)):
+        case ("lookup]" | None, Sym(name), Eval(Env(items, env_parent), parent)) if name in items:
+            if instr is None: return "lookup]", value, cont
+            return None, items[name], parent
+        case ("lookup_enclosing" | None, Sym(name), Eval(Env(items, env_parent), parent)) if name not in items:
+            if instr is None: return "lookup_enclosing", value, cont
             next_ = Eval(env_parent, parent)
-            return name, next_
-        case (str() as name, Eval(None, parent)):
+            return None, Sym(name), next_
+        case ("lookup_fail!" | None, Sym(name), Eval(None, parent)):
+            if instr is None: return "lookup_fail!", value, cont
             raise LookupError(name)
         # Evaluate the car and combine the result with the cdr
-        case (Pair(operator, operands), Eval(env, parent)):
+        case ("combine[" | None, Pair(operator, operands), Eval(env, parent)):
+            if instr is None: return "combine[", value, cont
             next_ = Combine(operands, env, parent)
             next2 = Eval(env, next_)
-            return operator, next2
+            return None, operator, next2
         # Everything else is self-evaluating
-        case (value, Eval(env, parent)) if not isinstance(value, Unknown):
-            return value, parent
+        case ("self_eval]" | None, value, Eval(env, parent)) if not isinstance(value, (Sym, Pair)) and (not isinstance(value, Unknown) or value in value.ctx.metadata):
+            if instr is None: return "self_eval]", value, cont
+            return None, value, parent
         # Handle $if primitive
-        case (Combiner(0, "$if"), Combine(Pair(cond, Pair(then, Pair(else_, ()))), dyn, parent)):
+        case ("if[" | None, Combiner(0, "$if"), Combine(Pair(cond, Pair(then, Pair(else_, Nil()))), dyn, parent)):
+            if instr is None: return "if[", value, cont
             next_ = IfHelper(then, else_, dyn, parent)
             next2 = Eval(dyn, next_)
-            return cond, next2
-        case (True, IfHelper(then, else_, dyn, parent)):
+            return None, cond, next2
+        case ("if_true" | None, Bool(True), IfHelper(then, else_, dyn, parent)):
+            if instr is None: return "if_true", value, cont
             next_ = Eval(dyn, parent)
-            return then, next_
-        case (False, IfHelper(then, else_, dyn, parent)):
+            return None, then, next_
+        case ("if_false" | None, Bool(False), IfHelper(then, else_, dyn, parent)):
+            if instr is None: return "if_false", value, cont
             next_ = Eval(dyn, parent)
-            return else_, next_
+            return None, else_, next_
         # Handle user defined operatives from $vau
-        case (Combiner(0, "$vau"), Combine(Pair(Pair((str() | EllipsisType()) as envname, Pair(str() as name, ())), Pair(body, ())), dyn, parent)):
+        case ("vau]" | None, Combiner(0, "$vau"), Combine(Pair(Pair((Sym() | Ignore()) as envname, Pair(Sym() as name, Nil())), Pair(body, Nil())), dyn, parent)):
+            if instr is None: return "vau]", value, cont
             operative = UserOp(dyn, envname, name, body)
             combiner = Combiner(0, operative)
-            return combiner, parent
-        case (Combiner(0, UserOp(static, EllipsisType(), name, body)), Combine(operands, dyn, parent)):
+            return None, combiner, parent
+        case ("call_ignore_env" | None, Combiner(0, UserOp(static, Ignore(), Sym(name), body)), Combine(operands, dyn, parent)):
+            if instr is None: return "call_ignore_env", value, cont
             env = Env({
                 name: operands,
             }, static)
             next_ = Eval(env, parent)
-            return body, next_
-        case (Combiner(0, UserOp(static, envname, name, body)), Combine(operands, dyn, parent)):
+            return None, body, next_
+        case ("call" | None, Combiner(0, UserOp(static, Sym(envname), Sym(name), body)), Combine(operands, dyn, parent)):
+            if instr is None: return "call", value, cont
             env = Env({
                 envname: dyn,
                 name: operands,
             }, static)
             next_ = Eval(env, parent)
-            return body, next_
+            return None, body, next_
         # Handle more primitives
-        case (Combiner(0, "cons"), Combine(Pair(car, Pair(cdr, ())), dyn, parent)):
-            return Pair(car, cdr), parent
-        case (Combiner(0, "car"), Combine(Pair(Pair(car, cdr), ()), dyn, parent)):
-            return car, parent
-        case (Combiner(0, "cdr"), Combine(Pair(Pair(car, cdr), ()), dyn, parent)):
-            return cdr, parent
-        case (Combiner(0, "eval"), Combine(Pair(env, Pair(expr, ())), dyn, parent)):
+        case ("cons]" | None, Combiner(0, "cons"), Combine(Pair(car, Pair(cdr, Nil())), dyn, parent)):
+            if instr is None: return "cons]", value, cont
+            return None, Pair(car, cdr), parent
+        case ("car]" | None, Combiner(0, "car"), Combine(Pair(Pair(car, cdr), Nil()), dyn, parent)):
+            if instr is None: return "car]", value, cont
+            return None, car, parent
+        case ("cdr]" | None, Combiner(0, "cdr"), Combine(Pair(Pair(car, cdr), Nil()), dyn, parent)):
+            if instr is None: return "cdr]", value, cont
+            return None, cdr, parent
+        case ("eval" | None, Combiner(0, "eval"), Combine(Pair(env, Pair(expr, Nil())), dyn, parent)):
+            if instr is None: return "eval", value, cont
             next_ = Eval(env, parent)
-            return expr, next_
+            return None, expr, next_
         # Handle wrapped operatives
-        case (Combiner(int() as num_wraps, operative) as combiner, Combine(operands, dyn, parent)) if num_wraps > 0:
-            next_ = EvLis(combiner, (), dyn, parent)
-            return operands, next_
-        case ((), EvLis(combiner, rev_args, dyn, parent)):
-            return rev_args, EvRev(combiner, (), dyn, parent)
-        case (Pair(operand, rest_operands), EvLis(combiner, rev_args, dyn, parent)):
+        case ("apply" | None, Combiner(int() as num_wraps, operative) as combiner, Combine(operands, dyn, parent)) if num_wraps > 0:
+            if instr is None: return "apply", value, cont
+            next_ = EvLis(combiner, Nil(), dyn, parent)
+            return None, operands, next_
+        case ("evlis_empty" | None, Nil(), EvLis(combiner, rev_args, dyn, parent)):
+            if instr is None: return "evlis_empty", value, cont
+            next_ = EvRev(combiner, Nil(), dyn, parent)
+            return None, rev_args, next_
+        case ("evlis[" | None, Pair(operand, rest_operands), EvLis(combiner, rev_args, dyn, parent)):
+            if instr is None: return "evlis[", value, cont
             next_ = EvArg(combiner, rev_args, rest_operands, dyn, parent)
             next2 = Eval(dyn, next_)
-            return operand, next2
-        case (value, EvArg(combiner, rev_args, rest_operands, dyn, parent)):
+            return None, operand, next2
+        case ("evarg" | None, value, EvArg(combiner, rev_args, rest_operands, dyn, parent)):
+            if instr is None: return "evarg", value, cont
             next_ = EvLis(combiner, Pair(value, rev_args), dyn, parent)
-            return rest_operands, next_
-        case ((), EvRev(combiner, args, dyn, parent)):
+            return None, rest_operands, next_
+        case ("evrev_empty" | None, Nil(), EvRev(combiner, args, dyn, parent)):
+            if instr is None: return "evrev_empty", value, cont
             unwrapped = Combiner(combiner.num_wraps - 1, combiner.operative)
             next_ = Combine(args, dyn, parent)
-            return unwrapped, next_
-        case (Pair(arg, restArgs), EvRev(combiner, args, dyn, parent)):
+            return None, unwrapped, next_
+        case ("evrev" | None, Pair(arg, restArgs), EvRev(combiner, args, dyn, parent)):
+            if instr is None: return "evrev", value, cont
             next_ = EvRev(combiner, Pair(arg, args), dyn, parent)
-            return restArgs, next_
+            return None, restArgs, next_
     raise NotImplementedError
 
-assert plug(1, Eval(None, None)) == (1, None)
-assert plug("var", Eval(Env({"var": 1}, None), None)) == (1, None)
-assert plug(*plug("up", Eval(Env({"var": 1}, Env({"up": 2}, None)), None))) == (2, None)
+# assert plug(1, Eval(None, None)) == (1, None)
+# assert plug(Sym("var"), Eval(Env({"var": 1}, None), None)) == (1, None)
+# assert plug(*plug(Sym("up"), Eval(Env({"var": 1}, Env({"up": 2}, None)), None))) == (2, None)
 
 def fully_evaluate(state):
+    state = None, *state
     while True:
         # print(state)
-        if state[1] is None:
-            return state[0]
-            break
         # input()
         if state[2] is None:
             return state[1]
@@ -178,13 +209,31 @@ def fully_evaluate(state):
             state = plug(*state)
         except NotImplementedError as e:
             raise NotImplementedError(state) from e
+def record_trace(state):
+    instrs = []
+    while True:
+        if state[2] is None:
+            return instrs, state[1]
+        try:
+            state = plug(*state)
+        except NotImplementedError as e:
+            raise NotImplementedError(state) from e
+        if state[0] is not None:
+            instrs.append(state[0])
+def run_trace(instrs, state):
+    for instr in instrs:
+        try:
+            state = plug(instr, *state[1:])
+        except NotImplementedError as e:
+            raise NotImplementedError(state) from e
+    return state
 
 assert fully_evaluate((
-    Pair("$if", Pair("var", Pair(1, Pair(2, ())))),
-    Eval(Env({"$if": Combiner(0, "$if"), "var": False}, None), None),
+    Pair(Sym("$if"), Pair(Sym("var"), Pair(1, Pair(2, Nil())))),
+    Eval(Env({"$if": Combiner(0, "$if"), "var": Bool(False)}, None), None),
 )) == 2
 assert fully_evaluate((
-    Pair(Pair("$vau", Pair(Pair("dyn", Pair("args", ())), Pair("args", ()))), 1),
+    Pair(Pair(Sym("$vau"), Pair(Pair(Sym("dyn"), Pair(Sym("args"), Nil())), Pair(Sym("args"), Nil()))), 1),
     Eval(Env({"$vau": Combiner(0, "$vau")}, None), None),
 )) == 1
 cond = fully_evaluate((
@@ -220,9 +269,9 @@ def test_hole():
         ))
     except NotImplementedError as e:
         hole = e.args[0]
-    assert hole[0] is var
-    assert isinstance(hole[1], IfHelper)
-    assert fully_evaluate((True, hole[1])) == 2
+    assert hole[1] is var
+    assert isinstance(hole[2], IfHelper)
+    assert fully_evaluate((Bool(True), hole[2])) == 2
 test_hole()
 
 def test_hole2():
@@ -240,13 +289,34 @@ def test_hole2():
         ))
     except NotImplementedError as e:
         hole = e.args[0]
-    assert isinstance(hole[0], Combiner)
-    assert hole[0][1] == "car"
-    assert isinstance(hole[1], Combine)
-    ctx.metadata[var] = Pair(True, False)
-    assert fully_evaluate(hole) == 1
-    ctx.metadata[var] = Pair(False, True)
-    assert fully_evaluate(hole) == 2
-    ctx.metadata[var] = Pair(False, False)
-    assert fully_evaluate(hole) == 3
+    assert isinstance(hole[1], Combiner)
+    assert hole[1][1] == "car"
+    assert isinstance(hole[2], Combine)
+    ctx.metadata[var] = Pair(Bool(True), Bool(False))
+    assert fully_evaluate(hole[1:]) == 1
+    ctx.metadata[var] = Pair(Bool(False), Bool(True))
+    assert fully_evaluate(hole[1:]) == 2
+    ctx.metadata[var] = Pair(Bool(False), Bool(False))
+    assert fully_evaluate(hole[1:]) == 3
 test_hole2()
+
+def test_trace():
+    ctx = Context({})
+    var = Unknown("var", ctx)
+    ctx.metadata[var] = Pair(Bool(False), Bool(True))
+    env = Env({"var": var}, cond.operative.static)
+    state = (
+        L("$cond",
+            L(L("car", "var", ()), 1, ()),
+            L(L("cdr", "var", ()), 2, ()),
+            L(True, 3, ()),
+        ()),
+        Eval(env, None),
+    )
+    steps, result = record_trace((None, *state))
+    assert result == 2
+    final = run_trace(steps, (None, *state))
+    print(*steps)
+    assert final[1] == 2
+    assert final[2] is None
+test_trace()
